@@ -45,6 +45,15 @@
   <!-- Dashboard Main Container -->
   <main class="dashboard-container">
 
+    <!-- Auth Alert Banner (visible when ADMIN_API_KEY is configured and user is unauthenticated) -->
+    <div id="auth-alert-banner" class="auth-alert-banner" style="display: none;">
+      <span class="auth-alert-icon">🔒</span>
+      <div class="auth-alert-text">
+        <strong>Admin Authentication Required:</strong> This Chronicle Engine is secured with an Admin API Key. Enter your key to manage websites and scheduled cues.
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="btn-banner-login">🔑 Enter Admin Key</button>
+    </div>
+
     <!-- Active Site & Embed Integration Overview -->
     <section class="site-overview-card">
       <div class="site-meta">
@@ -246,6 +255,8 @@
         <button type="button" class="btn btn-secondary" data-close-modal="modal-preview">Close</button>
       </div>
     </div>
+  </div>
+
   <!-- ================= MODAL: ADMIN LOGIN ================= -->
   <div class="modal-overlay" id="modal-auth">
     <div class="modal-box" style="max-width: 420px;">

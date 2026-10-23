@@ -4,6 +4,9 @@
   "description": "",
   "main": "server/index.js",
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "start": "node server/index.js",
     "demo": "node demo-site/server.js",

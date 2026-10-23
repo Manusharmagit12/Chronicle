@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -19,6 +18,7 @@ export const dbPath = process.env.DATABASE_PATH
 // Database instances
 let sqliteInstance = null;
 let pgPoolInstance = null;
+let DatabaseSyncClass = null;
 
 /**
  * Returns true if the environment is configured to use PostgreSQL (Neon)
@@ -39,14 +39,18 @@ export function getDatabaseType() {
 }
 
 /**
- * Get or initialize SQLite instance
+ * Get or initialize SQLite instance asynchronously (dynamic import protects Node versions on cloud)
  */
-function getSqliteDb() {
+async function getSqliteDb() {
   if (!sqliteInstance) {
+    if (!DatabaseSyncClass) {
+      const sqliteModule = await import('node:sqlite');
+      DatabaseSyncClass = sqliteModule.DatabaseSync;
+    }
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
-    sqliteInstance = new DatabaseSync(dbPath);
+    sqliteInstance = new DatabaseSyncClass(dbPath);
   }
   return sqliteInstance;
 }
@@ -124,15 +128,73 @@ const COMMON_SCHEMA = `
 `;
 
 /**
- * Initialize schema for active database
+ * Initialize schema for active database and seed default site if empty
  */
 export async function initDb() {
   if (isPostgresDatabase()) {
     const pool = getPgPool();
     await pool.query(COMMON_SCHEMA);
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     db.exec(COMMON_SCHEMA);
+  }
+
+  // Ensure default demo site exists if no sites are registered yet
+  try {
+    const sites = await listSites();
+    if (sites.length === 0) {
+      const now = Date.now();
+      await upsertSite({
+        id: 'apex-university',
+        name: 'Apex Institute of Technology',
+        domain: '' // allows delivery to any origin by default
+      });
+
+      await createCue({
+        id: 'cue-banner-active',
+        site_id: 'apex-university',
+        title: 'Fall Semester Admissions Open',
+        placement_type: 'top_banner',
+        content_html: `
+          <div style="display:flex; align-items:center; gap:12px; font-weight:500;">
+            <span style="background:rgba(59,130,246,0.25); border:1px solid #3b82f6; color:#93c5fd; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Live Now</span>
+            <span>🎓 <strong>Apex Admissions Open:</strong> Applications for Spring & Fall cohorts are now live. Priority deadline ends in 2 weeks!</span>
+            <a href="#admissions" style="color:#60a5fa; text-decoration:underline; font-weight:600; margin-left:8px;">View Programs &rarr;</a>
+          </div>
+        `,
+        css_styles: `
+          .chronicle-top-banner {
+            background: linear-gradient(90deg, #0f172a 0%, #1e1b4b 100%) !important;
+            border-bottom: 1px solid rgba(99, 102, 241, 0.3) !important;
+          }
+        `,
+        start_at: new Date(now - 10 * 60 * 1000).toISOString(),
+        end_at: new Date(now + 24 * 60 * 60 * 1000).toISOString()
+      });
+
+      await createCue({
+        id: 'cue-notice-active',
+        site_id: 'apex-university',
+        title: 'Campus Career Fair Notice',
+        placement_type: 'selector',
+        target_selector: '#notice-board',
+        action: 'prepend',
+        content_html: `
+          <div class="notice-card highlight-notice" style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9)); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 12px; padding: 20px; margin-bottom: 18px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="background:#2563eb; color:#fff; font-size:11px; font-weight:700; padding:2px 8px; border-radius:4px; text-transform:uppercase;">Scheduled Notice</span>
+              <span style="font-size:12px; color:#94a3b8;">Active for 24h</span>
+            </div>
+            <h4 style="margin:0 0 6px 0; color:#f8fafc; font-size:16px;">🚀 Annual Tech Career Fair 2026</h4>
+            <p style="margin:0; color:#cbd5e1; font-size:13.5px; line-height:1.5;">Over 45 industry partners will be on campus today in the Main Auditorium. Bring printed resumes and student ID cards.</p>
+          </div>
+        `,
+        start_at: new Date(now - 5 * 60 * 1000).toISOString(),
+        end_at: new Date(now + 24 * 60 * 60 * 1000).toISOString()
+      });
+    }
+  } catch (seedErr) {
+    console.warn('[Chronicle DB] Notice: Seed check skipped or failed:', seedErr.message);
   }
 }
 
@@ -146,7 +208,7 @@ export async function getSite(siteId) {
     const res = await pool.query('SELECT * FROM sites WHERE id = $1', [siteId]);
     return res.rows[0] || null;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('SELECT * FROM sites WHERE id = ?');
     return stmt.get(siteId) || null;
   }
@@ -164,7 +226,7 @@ export async function upsertSite({ id, name, domain }) {
     `, [id, name, domain || '', now]);
     return res.rows[0];
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const existing = await getSite(id);
     if (existing) {
       const stmt = db.prepare('UPDATE sites SET name = ?, domain = ? WHERE id = ?');
@@ -183,7 +245,7 @@ export async function listSites() {
     const res = await pool.query('SELECT * FROM sites ORDER BY created_at DESC');
     return res.rows;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('SELECT * FROM sites ORDER BY created_at DESC');
     return stmt.all();
   }
@@ -195,7 +257,7 @@ export async function deleteSite(siteId) {
     await pool.query('DELETE FROM sites WHERE id = $1', [siteId]);
     return true;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('DELETE FROM sites WHERE id = ?');
     stmt.run(siteId);
     return true;
@@ -246,7 +308,7 @@ export async function createCue({
     ]);
     return res.rows[0];
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare(`
       INSERT INTO cues (
         id, site_id, title, placement_type, target_selector,
@@ -277,7 +339,7 @@ export async function getCue(id) {
     const res = await pool.query('SELECT * FROM cues WHERE id = $1', [id]);
     return res.rows[0] || null;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('SELECT * FROM cues WHERE id = ?');
     return stmt.get(id) || null;
   }
@@ -289,7 +351,7 @@ export async function deleteCue(id) {
     await pool.query('DELETE FROM cues WHERE id = $1', [id]);
     return true;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('DELETE FROM cues WHERE id = ?');
     stmt.run(id);
     return true;
@@ -328,7 +390,7 @@ export async function updateCue(id, updates) {
     `, [title, placement_type, target_selector, action, content_html, css_styles, start_at, end_at, is_active, id]);
     return res.rows[0];
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare(`
       UPDATE cues SET
         title = ?,
@@ -357,7 +419,7 @@ export async function toggleCueActive(id, forcedState = null) {
     const res = await pool.query('UPDATE cues SET is_active = $1 WHERE id = $2 RETURNING *', [newState, id]);
     return res.rows[0];
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('UPDATE cues SET is_active = ? WHERE id = ?');
     stmt.run(newState, id);
     return getCue(id);
@@ -370,7 +432,7 @@ export async function listCuesForSite(siteId) {
     const res = await pool.query('SELECT * FROM cues WHERE site_id = $1 ORDER BY start_at ASC', [siteId]);
     return res.rows;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare('SELECT * FROM cues WHERE site_id = ? ORDER BY start_at ASC');
     return stmt.all(siteId);
   }
@@ -399,7 +461,7 @@ export async function getCuesForDelivery(siteId, lookaheadMs = 24 * 60 * 60 * 10
     `, [siteId, nowIso, lookaheadIso]);
     cues = res.rows;
   } else {
-    const db = getSqliteDb();
+    const db = await getSqliteDb();
     const stmt = db.prepare(`
       SELECT * FROM cues
       WHERE site_id = ?

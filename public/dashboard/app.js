@@ -29,6 +29,8 @@
   const cuesContainer = document.getElementById('cues-container');
   const emptyState = document.getElementById('empty-state');
   const btnAuthAction = document.getElementById('btn-auth-action');
+  const authAlertBanner = document.getElementById('auth-alert-banner');
+  const btnBannerLogin = document.getElementById('btn-banner-login');
   const linkDemoSite = document.getElementById('link-demo-site');
 
   // Filter tabs
@@ -143,6 +145,9 @@
   }
 
   function updateAuthUI() {
+    if (authAlertBanner) {
+      authAlertBanner.style.display = (authRequired && !isAuthenticated) ? 'flex' : 'none';
+    }
     if (!btnAuthAction) return;
 
     if (!authRequired) {
@@ -215,6 +220,13 @@
         siteSelect.value = currentSiteId;
         updateSiteDetails();
         await loadCues();
+      } else {
+        currentSiteNameEl.textContent = 'No Registered Websites';
+        currentSiteIdBadge.textContent = 'none';
+        currentSiteDomainEl.textContent = 'Register a website to generate an embed code';
+        embedCodeText.textContent = 'Register a website to generate snippet.';
+        allCues = [];
+        renderCues();
       }
     } catch (err) {
       console.error('Failed to load sites:', err);
@@ -426,6 +438,10 @@
    * Modal Handlers: Create / Edit Cue
    */
   function openCreateCueModal() {
+    if (authRequired && !isAuthenticated) {
+      openModal('modal-auth');
+      return;
+    }
     isEditingCue = false;
     modalCueTitle.textContent = 'Schedule Timed Content';
     cueIdInput.value = '';
@@ -743,8 +759,18 @@
 
     document.getElementById('btn-create-cue').addEventListener('click', openCreateCueModal);
     document.getElementById('btn-empty-create').addEventListener('click', openCreateCueModal);
-    document.getElementById('btn-add-site').addEventListener('click', () => openModal('modal-site'));
+    document.getElementById('btn-add-site').addEventListener('click', () => {
+      if (authRequired && !isAuthenticated) {
+        openModal('modal-auth');
+      } else {
+        openModal('modal-site');
+      }
+    });
     document.getElementById('btn-refresh-cues').addEventListener('click', loadCues);
+
+    if (btnBannerLogin) {
+      btnBannerLogin.addEventListener('click', () => openModal('modal-auth'));
+    }
 
     // Auth action button
     if (btnAuthAction) {

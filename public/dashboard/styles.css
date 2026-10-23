@@ -619,3 +619,34 @@ textarea.form-control {
   max-height: 250px;
   overflow-y: auto;
 }
+
+/* Auth Alert Banner */
+.auth-alert-banner {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-md);
+  padding: 14px 20px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #fca5a5;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.auth-alert-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.auth-alert-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.auth-alert-text strong {
+  color: #fff;
+  display: block;
+  margin-bottom: 2px;
+}
