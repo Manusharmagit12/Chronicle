@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Apex Institute of Technology — Chronicle Demo</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Site Navigation Header -->
+  <header class="site-header">
+    <div class="nav-container">
+      <a href="#" class="logo">
+        <div class="logo-icon">🏛️</div>
+        <span>Apex Institute</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#about">About</a></li>
+        <li><a href="#programs">Academics</a></li>
+        <li><a href="#notice-board-section">Notice Board</a></li>
+        <li><a href="#admissions" class="btn-nav">Apply Now</a></li>
+      </ul>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="page-layout">
+    
+    <!-- Left Column: Realistic University Website Content -->
+    <main class="main-content">
+      
+      <!-- Hero Section -->
+      <section class="hero-section" id="about">
+        <div class="hero-badge">
+          <span>✨ Academic Year 2026–2027</span>
+        </div>
+        <h1 class="hero-title">Shaping the Next Generation of Thinkers & Creators.</h1>
+        <p class="hero-desc">
+          At Apex Institute of Technology, we combine world-class research with immersive hands-on engineering, data science, and design curricula.
+        </p>
+        <div class="hero-actions">
+          <button class="btn-primary">Explore Undergraduate Programs</button>
+          <button class="btn-secondary">Virtual Campus Tour</button>
+        </div>
+      </section>
+
+      <!-- Campus Notice Board (CSS Selector Target for Chronicle) -->
+      <section id="notice-board-section">
+        <h2 class="section-title">
+          <span>Campus Notices & Bulletins</span>
+          <span class="target-badge">Target: #notice-board</span>
+        </h2>
+        
+        <!-- The target element where Chronicle will inject/schedule cues -->
+        <div id="notice-board" class="notice-board-container">
+          <!-- Default static notices that exist permanently on the website -->
+          <div class="static-notice">
+            <h4>Library Extended Hours for Midterms</h4>
+            <p>The Central Library will remain open 24/7 starting next Monday through exam week. Study rooms can be reserved online.</p>
+          </div>
+          <div class="static-notice">
+            <h4>Shuttle Bus Schedule Update</h4>
+            <p>North Campus shuttle route will experience a 10-minute detour due to transit repairs on Boulevard Ave.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Departments Section -->
+      <section id="programs">
+        <h2 class="section-title">Academic Departments</h2>
+        <div class="dept-grid">
+          <div class="dept-card">
+            <h4>Computer Science & AI</h4>
+            <p>Machine learning, systems architecture, and distributed computing.</p>
+          </div>
+          <div class="dept-card">
+            <h4>Robotics & Mechatronics</h4>
+            <p>Autonomous systems, kinematic control, and sensor networks.</p>
+          </div>
+          <div class="dept-card">
+            <h4>Bioengineering</h4>
+            <p>Computational genomics, biomechanics, and synthetic biology.</p>
+          </div>
+          <div class="dept-card">
+            <h4>Design & Media</h4>
+            <p>HCI, interactive media, and product design systems.</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Right Column: Interactive Chronicle Testbed & Live Controller -->
+    <aside class="sidebar">
+      <div class="simulator-panel">
+        <div class="sim-header">
+          <span class="sim-badge">Phase 1 Live Testbed</span>
+          <h3 class="sim-title">Chronicle Controller</h3>
+          <p class="sim-subtitle">Simulate real-time cue schedules and observe zero-reload DOM updates.</p>
+        </div>
+
+        <!-- Clock & Sync Status -->
+        <div class="clock-box">
+          <div class="clock-item">
+            <span class="clock-label">Server Time</span>
+            <span class="clock-val" id="server-clock">--:--:--</span>
+          </div>
+          <div class="clock-item">
+            <span class="clock-label">Active Cues</span>
+            <span class="clock-val" id="active-count" style="color: #34d399;">0</span>
+          </div>
+        </div>
+
+        <!-- Schedule Trigger Controls -->
+        <div class="sim-actions">
+          <!-- Button 1: Test Top Banner -->
+          <button class="btn-schedule" id="btn-schedule-banner">
+            <span>⚡ Schedule Flash Top Banner</span>
+            <span class="btn-schedule-desc">Starts in 10s &bull; Auto-removes in 25s &bull; No page reload</span>
+          </button>
+
+          <!-- Button 2: Test Notice Board -->
+          <button class="btn-schedule" id="btn-schedule-notice">
+            <span>📋 Schedule Notice in #notice-board</span>
+            <span class="btn-schedule-desc">Prepends in 10s &bull; Auto-removes in 25s &bull; No page reload</span>
+          </button>
+
+          <!-- Button 3: Reset / Re-seed -->
+          <button class="btn-schedule" id="btn-reset" style="border-color: rgba(239, 68, 68, 0.3);">
+            <span>🔄 Reset to Default Cues</span>
+            <span class="btn-schedule-desc">Clears test triggers and restores default seed</span>
+          </button>
+        </div>
+
+        <!-- Live Event Log -->
+        <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.75rem; text-transform: uppercase; color: #94a3b8; font-weight: 700;">Live Event Stream</span>
+          <span id="log-status" style="font-size: 0.7rem; color: #38bdf8;">Listening...</span>
+        </div>
+        <div class="log-box" id="event-log">
+          <div class="log-entry log-info">[Init] Chronicle embed script loading...</div>
+        </div>
+
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Load dynamic configuration from server -->
+  <script src="/config.js"></script>
+
+  <!-- Dynamically inject Chronicle Embed Script based on runtime config -->
+  <script>
+    (function() {
+      const cfg = window.CHRONICLE_CONFIG || {
+        apiUrl: 'http://localhost:3000',
+        siteKey: 'apex-university'
+      };
+
+      const script = document.createElement('script');
+      script.src = `${cfg.apiUrl}/chronicle.js`;
+      script.setAttribute('data-site-key', cfg.siteKey);
+      script.setAttribute('data-api-url', cfg.apiUrl);
+      document.head.appendChild(script);
+    })();
+  </script>
+
+  <!-- Script for the Demo Testbed Controller -->
+  <script>
+    const cfg = window.CHRONICLE_CONFIG || { apiUrl: 'http://localhost:3000', siteKey: 'apex-university' };
+    const CHRONICLE_API = `${cfg.apiUrl}/api/v1`;
+    const SITE_KEY = cfg.siteKey;
+
+    const serverClockEl = document.getElementById('server-clock');
+    const activeCountEl = document.getElementById('active-count');
+    const eventLogEl = document.getElementById('event-log');
+
+    function logEvent(type, message) {
+      const timeStr = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.innerHTML = `<span class="log-time">${timeStr}</span> ${message}`;
+      eventLogEl.prepend(entry);
+    }
+
+    // Live clock ticker
+    setInterval(() => {
+      if (window.Chronicle) {
+        const time = new Date(window.Chronicle.getServerTime());
+        serverClockEl.textContent = time.toLocaleTimeString();
+        if (window.Chronicle.getActiveCues) {
+          activeCountEl.textContent = window.Chronicle.getActiveCues().length;
+        }
+      }
+    }, 1000);
+
+    // Listen to window events dispatched by chronicle.js
+    window.addEventListener('chronicle:synced', (e) => {
+      const { cues } = e.detail;
+      const active = cues.filter(c => c.status === 'active').length;
+      const upcoming = cues.filter(c => c.status === 'upcoming').length;
+      logEvent('synced', `Synced: <strong>${active} active</strong>, <strong>${upcoming} upcoming</strong> cues.`);
+    });
+
+    window.addEventListener('chronicle:cue-activated', (e) => {
+      const cue = e.detail;
+      logEvent('activated', `<strong>[ACTIVATED]</strong> '${cue.title}' (${cue.placement_type}) rendered into DOM.`);
+    });
+
+    window.addEventListener('chronicle:cue-expired', (e) => {
+      const cue = e.detail;
+      logEvent('expired', `<strong>[EXPIRED]</strong> '${cue.title}' unmounted from DOM.`);
+    });
+
+    // Schedule Flash Top Banner Test (Starts in 10s, Disappears in 25s)
+    document.getElementById('btn-schedule-banner').addEventListener('click', async () => {
+      const now = Date.now();
+      const startAt = new Date(now + 10 * 1000).toISOString(); // +10s
+      const endAt = new Date(now + 35 * 1000).toISOString();   // +35s (lasts 25s)
+      
+      const btn = document.getElementById('btn-schedule-banner');
+      btn.style.opacity = '0.5';
+      btn.disabled = true;
+
+      try {
+        logEvent('info', `Scheduling Flash Banner: Starts in 10s, ends in 35s...`);
+        const res = await fetch(`${CHRONICLE_API}/cues`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            site_id: SITE_KEY,
+            title: 'Flash Sale: 50% Off Alumni Merchandise',
+            placement_type: 'top_banner',
+            content_html: `
+              <div style="display:flex; align-items:center; gap:12px;">
+                <span style="background:#ef4444; color:#fff; font-size:11px; font-weight:800; padding:2px 8px; border-radius:4px; text-transform:uppercase;">Flash Alert</span>
+                <span>⚡ <strong>Timed Flash Announcement:</strong> This banner appeared automatically at scheduled time and will disappear automatically in 25s without reloading!</span>
+              </div>
+            `,
+            css_styles: `
+              .chronicle-top-banner {
+                background: linear-gradient(90deg, #7f1d1d 0%, #b91c1c 100%) !important;
+                border-bottom: 2px solid #ef4444 !important;
+              }
+            `,
+            start_at: startAt,
+            end_at: endAt
+          })
+        });
+
+        if (res.ok) {
+          logEvent('info', 'Cue saved on server. Triggering Chronicle refresh...');
+          if (window.Chronicle) window.Chronicle.refresh();
+          
+          let remaining = 10;
+          const interval = setInterval(() => {
+            remaining--;
+            if (remaining > 0) {
+              btn.querySelector('.btn-schedule-desc').textContent = `Starts in ${remaining}s... watch page top!`;
+            } else {
+              clearInterval(interval);
+              btn.style.opacity = '1';
+              btn.disabled = false;
+              btn.querySelector('.btn-schedule-desc').textContent = `Starts in 10s • Auto-removes in 25s • No page reload`;
+            }
+          }, 1000);
+        } else {
+          const err = await res.json();
+          logEvent('expired', `Error: ${err.error}`);
+          btn.style.opacity = '1';
+          btn.disabled = false;
+        }
+      } catch (err) {
+        logEvent('expired', `Network error: ${err.message}`);
+        btn.style.opacity = '1';
+        btn.disabled = false;
+      }
+    });
+
+    // Schedule In-Page Notice inside #notice-board (Starts in 10s, Disappears in 25s)
+    document.getElementById('btn-schedule-notice').addEventListener('click', async () => {
+      const now = Date.now();
+      const startAt = new Date(now + 10 * 1000).toISOString();
+      const endAt = new Date(now + 35 * 1000).toISOString();
+
+      const btn = document.getElementById('btn-schedule-notice');
+      btn.style.opacity = '0.5';
+      btn.disabled = true;
+
+      try {
+        logEvent('info', `Scheduling In-Page Notice in #notice-board (starts in 10s)...`);
+        const res = await fetch(`${CHRONICLE_API}/cues`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            site_id: SITE_KEY,
+            title: 'Emergency Lab Maintenance Warning',
+            placement_type: 'selector',
+            target_selector: '#notice-board',
+            action: 'prepend',
+            content_html: `
+              <div class="notice-card" style="background: linear-gradient(135deg, rgba(185, 28, 28, 0.2), rgba(127, 29, 29, 0.3)); border: 1px solid #ef4444; border-radius: 12px; padding: 18px; margin-bottom: 14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <span style="background:#dc2626; color:#fff; font-size:11px; font-weight:800; padding:2px 8px; border-radius:4px; text-transform:uppercase;">Scheduled Maintenance</span>
+                  <span style="font-size:11px; color:#fca5a5;">Auto-expires in 25 seconds</span>
+                </div>
+                <h4 style="margin:0 0 6px 0; color:#fee2e2; font-size:15px;">⚠️ Robotics Lab Server Maintenance In Progress</h4>
+                <p style="margin:0; color:#fecaca; font-size:13px; line-height:1.4;">Servers in Room 402 will undergo temporary cooling maintenance. Save all simulation jobs immediately.</p>
+              </div>
+            `,
+            start_at: startAt,
+            end_at: endAt
+          })
+        });
+
+        if (res.ok) {
+          logEvent('info', 'Cue saved on server. Triggering Chronicle refresh...');
+          if (window.Chronicle) window.Chronicle.refresh();
+
+          let remaining = 10;
+          const interval = setInterval(() => {
+            remaining--;
+            if (remaining > 0) {
+              btn.querySelector('.btn-schedule-desc').textContent = `Starts in ${remaining}s... watch #notice-board!`;
+            } else {
+              clearInterval(interval);
+              btn.style.opacity = '1';
+              btn.disabled = false;
+              btn.querySelector('.btn-schedule-desc').textContent = `Prepends in 10s • Auto-removes in 25s • No page reload`;
+            }
+          }, 1000);
+        } else {
+          const err = await res.json();
+          logEvent('expired', `Error: ${err.error}`);
+          btn.style.opacity = '1';
+          btn.disabled = false;
+        }
+      } catch (err) {
+        logEvent('expired', `Network error: ${err.message}`);
+        btn.style.opacity = '1';
+        btn.disabled = false;
+      }
+    });
+
+    // Reset button
+    document.getElementById('btn-reset').addEventListener('click', async () => {
+      try {
+        logEvent('info', 'Resetting cues to initial seed state...');
+        // Fetch all cues and delete them
+        const allRes = await fetch(`${CHRONICLE_API}/cues/all?siteKey=${SITE_KEY}`);
+        const data = await allRes.json();
+        for (const cue of data.cues) {
+          await fetch(`${CHRONICLE_API}/cues/${cue.id}`, { method: 'DELETE' });
+        }
+        // Re-create default top banner
+        const now = Date.now();
+        await fetch(`${CHRONICLE_API}/cues`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: 'cue-banner-active',
+            site_id: SITE_KEY,
+            title: 'Fall Semester Admissions Open',
+            placement_type: 'top_banner',
+            content_html: `
+              <div style="display:flex; align-items:center; gap:12px; font-weight:500;">
+                <span style="background:rgba(59,130,246,0.25); border:1px solid #3b82f6; color:#93c5fd; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Live Now</span>
+                <span>🎓 <strong>Apex Admissions Open:</strong> Applications for Spring & Fall cohorts are now live. Priority deadline ends in 2 weeks!</span>
+                <a href="#admissions" style="color:#60a5fa; text-decoration:underline; font-weight:600; margin-left:8px;">View Programs &rarr;</a>
+              </div>
+            `,
+            start_at: new Date(now - 10 * 60 * 1000).toISOString(),
+            end_at: new Date(now + 2 * 60 * 60 * 1000).toISOString()
+          })
+        });
+
+        logEvent('synced', 'Reset complete. Refreshing Chronicle...');
+        if (window.Chronicle) window.Chronicle.refresh();
+      } catch (err) {
+        logEvent('expired', `Reset failed: ${err.message}`);
+      }
+    });
+  </script>
+
+</body>
+</html>
