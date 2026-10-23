@@ -2,14 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initDb, dbPath, dataDir } from './db.js';
+import { initDb, dbPath, dataDir, getDatabaseType } from './db.js';
 import { apiRouter } from './routes/api.js';
 import { isAuthRequired } from './auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Initialize database schema
-initDb();
+// Initialize database schema asynchronously (supports SQLite & Neon PostgreSQL)
+await initDb();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -37,6 +37,7 @@ app.get('/', (req, res) => {
 app.get('/api/v1/config', (req, res) => {
   res.json({
     publicUrl: process.env.CHRONICLE_PUBLIC_URL || null,
+    databaseType: getDatabaseType(),
     authRequired: isAuthRequired(),
     serverTime: new Date().toISOString()
   });
@@ -48,8 +49,9 @@ app.get('/health', (req, res) => {
     status: 'ok',
     service: 'Chronicle Engine',
     database: {
-      storageDir: dataDir,
-      dbFile: path.basename(dbPath)
+      type: getDatabaseType(),
+      storageDir: getDatabaseType() === 'sqlite' ? dataDir : 'remote-neon-postgres',
+      dbFile: getDatabaseType() === 'sqlite' ? path.basename(dbPath) : 'postgresql'
     },
     authConfigured: isAuthRequired(),
     serverTime: new Date().toISOString()
@@ -58,7 +60,7 @@ app.get('/health', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[Chronicle Engine] Server running on port ${PORT}`);
-  console.log(`[Chronicle Engine] Database storage: ${dbPath}`);
+  console.log(`[Chronicle Engine] Database: ${getDatabaseType().toUpperCase()}`);
   console.log(`[Chronicle Engine] Admin Auth: ${isAuthRequired() ? 'ENABLED (ADMIN_API_KEY set)' : 'OPEN / DEV MODE'}`);
   if (process.env.CHRONICLE_PUBLIC_URL) {
     console.log(`[Chronicle Engine] Public URL configured: ${process.env.CHRONICLE_PUBLIC_URL}`);

@@ -170,14 +170,14 @@ apiRouter.post('/auth/logout', (req, res) => {
  * Public Delivery API: Called by chronicle.js on client websites.
  * Returns time-validated active cues and upcoming cues for the current time.
  */
-apiRouter.get('/cues', (req, res) => {
+apiRouter.get('/cues', async (req, res) => {
   const { siteKey } = req.query;
 
   if (!siteKey) {
     return res.status(400).json({ error: 'Missing required query parameter: siteKey' });
   }
 
-  const site = getSite(siteKey);
+  const site = await getSite(siteKey);
   if (!site) {
     return res.status(404).json({ error: `Site '${siteKey}' not found` });
   }
@@ -193,7 +193,7 @@ apiRouter.get('/cues', (req, res) => {
 
   const serverTime = new Date().toISOString();
   // Fetch active cues and cues starting within the next 24 hours
-  const cues = getCuesForDelivery(siteKey);
+  const cues = await getCuesForDelivery(siteKey);
 
   res.json({
     site: {
@@ -212,18 +212,19 @@ apiRouter.get('/cues', (req, res) => {
 /**
  * Admin: List all cues for a site (including expired, active, upcoming, paused)
  */
-apiRouter.get('/cues/all', requireAdminAuth, (req, res) => {
+apiRouter.get('/cues/all', requireAdminAuth, async (req, res) => {
   const { siteKey } = req.query;
   if (!siteKey) {
     return res.status(400).json({ error: 'Missing siteKey' });
   }
-  const site = getSite(siteKey);
+  const site = await getSite(siteKey);
   if (!site) {
     return res.status(404).json({ error: 'Site not found' });
   }
 
   const nowIso = new Date().toISOString();
-  const cues = listCuesForSite(siteKey).map(cue => {
+  const rawCues = await listCuesForSite(siteKey);
+  const cues = rawCues.map(cue => {
     let status = 'expired';
     if (cue.is_active === 0) {
       status = 'paused';
@@ -245,8 +246,8 @@ apiRouter.get('/cues/all', requireAdminAuth, (req, res) => {
 /**
  * Admin: Get single cue by ID
  */
-apiRouter.get('/cues/single/:id', requireAdminAuth, (req, res) => {
-  const cue = getCue(req.params.id);
+apiRouter.get('/cues/single/:id', requireAdminAuth, async (req, res) => {
+  const cue = await getCue(req.params.id);
   if (!cue) {
     return res.status(404).json({ error: 'Cue not found' });
   }
@@ -256,7 +257,7 @@ apiRouter.get('/cues/single/:id', requireAdminAuth, (req, res) => {
 /**
  * Admin: Create or schedule a cue
  */
-apiRouter.post('/cues', requireAdminAuth, (req, res) => {
+apiRouter.post('/cues', requireAdminAuth, async (req, res) => {
   try {
     const {
       id,
@@ -282,12 +283,12 @@ apiRouter.post('/cues', requireAdminAuth, (req, res) => {
       return res.status(400).json({ error: 'start_at must be before end_at' });
     }
 
-    const site = getSite(site_id);
+    const site = await getSite(site_id);
     if (!site) {
       return res.status(404).json({ error: `Site '${site_id}' does not exist` });
     }
 
-    const cue = createCue({
+    const cue = await createCue({
       id,
       site_id,
       title,
@@ -311,10 +312,10 @@ apiRouter.post('/cues', requireAdminAuth, (req, res) => {
 /**
  * Admin: Update an existing cue
  */
-apiRouter.put('/cues/:id', requireAdminAuth, (req, res) => {
+apiRouter.put('/cues/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = getCue(id);
+    const existing = await getCue(id);
     if (!existing) {
       return res.status(404).json({ error: 'Cue not found' });
     }
@@ -335,7 +336,7 @@ apiRouter.put('/cues/:id', requireAdminAuth, (req, res) => {
       return res.status(400).json({ error: 'start_at must be before end_at' });
     }
 
-    const updated = updateCue(id, {
+    const updated = await updateCue(id, {
       title,
       placement_type,
       target_selector,
@@ -357,16 +358,16 @@ apiRouter.put('/cues/:id', requireAdminAuth, (req, res) => {
 /**
  * Admin: Toggle active state (cancellation/pause/resume)
  */
-apiRouter.patch('/cues/:id/toggle', requireAdminAuth, (req, res) => {
+apiRouter.patch('/cues/:id/toggle', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const existing = getCue(id);
+    const existing = await getCue(id);
     if (!existing) {
       return res.status(404).json({ error: 'Cue not found' });
     }
 
     const forcedState = req.body.is_active !== undefined ? req.body.is_active : null;
-    const updated = toggleCueActive(id, forcedState);
+    const updated = await toggleCueActive(id, forcedState);
     res.json({ success: true, cue: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -376,34 +377,35 @@ apiRouter.patch('/cues/:id/toggle', requireAdminAuth, (req, res) => {
 /**
  * Admin: Delete a cue
  */
-apiRouter.delete('/cues/:id', requireAdminAuth, (req, res) => {
-  deleteCue(req.params.id);
+apiRouter.delete('/cues/:id', requireAdminAuth, async (req, res) => {
+  await deleteCue(req.params.id);
   res.json({ success: true, message: `Cue ${req.params.id} deleted` });
 });
 
 /**
  * Admin: Register or update a site
  */
-apiRouter.post('/sites', requireAdminAuth, (req, res) => {
+apiRouter.post('/sites', requireAdminAuth, async (req, res) => {
   const { id, name, domain } = req.body;
   if (!id || !name) {
     return res.status(400).json({ error: 'Missing required fields: id, name' });
   }
-  const site = upsertSite({ id, name, domain });
+  const site = await upsertSite({ id, name, domain });
   res.json({ success: true, site });
 });
 
 /**
  * Admin: List sites
  */
-apiRouter.get('/sites', requireAdminAuth, (req, res) => {
-  res.json({ sites: listSites() });
+apiRouter.get('/sites', requireAdminAuth, async (req, res) => {
+  const sites = await listSites();
+  res.json({ sites });
 });
 
 /**
  * Admin: Delete site
  */
-apiRouter.delete('/sites/:id', requireAdminAuth, (req, res) => {
-  deleteSite(req.params.id);
+apiRouter.delete('/sites/:id', requireAdminAuth, async (req, res) => {
+  await deleteSite(req.params.id);
   res.json({ success: true, message: `Site ${req.params.id} deleted` });
 });

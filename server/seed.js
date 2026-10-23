@@ -1,26 +1,26 @@
-import { initDb, upsertSite, createCue, listCuesForSite, deleteCue } from './db.js';
+import { initDb, upsertSite, createCue, listCuesForSite, deleteCue, closeDb, getDatabaseType } from './db.js';
 
-initDb();
+await initDb();
 
-console.log('[Seed] Seeding sample sites and cues...');
+console.log(`[Seed] Seeding sample sites and cues for database: ${getDatabaseType().toUpperCase()}...`);
 
 const siteId = 'apex-university';
-upsertSite({
+await upsertSite({
   id: siteId,
   name: 'Apex Institute of Technology',
   domain: 'http://localhost:3001'
 });
 
 // Clear previous cues for clean state
-const existingCues = listCuesForSite(siteId);
+const existingCues = await listCuesForSite(siteId);
 for (const c of existingCues) {
-  deleteCue(c.id);
+  await deleteCue(c.id);
 }
 
 const now = Date.now();
 
 // 1. Currently ACTIVE Cue: Top Announcement Banner
-createCue({
+await createCue({
   id: 'cue-banner-active',
   site_id: siteId,
   title: 'Fall Semester Admissions Open',
@@ -43,7 +43,7 @@ createCue({
 });
 
 // 2. Currently ACTIVE Cue: Notice Board highlight
-createCue({
+await createCue({
   id: 'cue-notice-active',
   site_id: siteId,
   title: 'Campus Career Fair Notice',
@@ -65,3 +65,4 @@ createCue({
 });
 
 console.log('[Seed] Database seeded with site "apex-university" and 2 active cues.');
+await closeDb();

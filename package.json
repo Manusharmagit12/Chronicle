@@ -11,13 +11,18 @@
     "verify": "node test/engine-verify.js",
     "test:dashboard": "node test/dashboard-workflow.test.js",
     "test:production": "node test/production-ready.test.js",
-    "test": "node test/engine-verify.js && node test/dashboard-workflow.test.js && node test/production-ready.test.js && node test/auth-unit.test.js"
+    "test:postgres": "node test/postgres-persistence.test.js",
+    "test": "node test/engine-verify.js && node test/dashboard-workflow.test.js && node test/production-ready.test.js && node test/auth-unit.test.js && node test/postgres-persistence.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.6",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14"
   }
 }

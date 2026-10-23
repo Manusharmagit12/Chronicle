@@ -2,19 +2,15 @@ services:
   - type: web
     name: chronicle-engine
     runtime: node
-    plan: starter # Render Starter plan or above is required for Persistent Disks
+    plan: free # 100% Free Tier on Render (using external Neon PostgreSQL for persistence)
     region: oregon
     buildCommand: npm install
     startCommand: npm start
-    disk:
-      name: chronicle-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
-      - key: CHRONICLE_DATA_DIR
-        value: /var/data
+      - key: DATABASE_URL
+        sync: false # Set in Render Dashboard to your Neon PostgreSQL connection string (postgresql://...)
       - key: ADMIN_API_KEY
         generateValue: true # Render automatically generates a cryptographically secure random key
       - key: CHRONICLE_PUBLIC_URL

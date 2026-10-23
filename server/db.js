@@ -2,80 +2,211 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import pg from 'pg';
 
+const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// SQLite storage configuration (fallback / local development)
 export const dataDir = process.env.CHRONICLE_DATA_DIR
   ? path.resolve(process.env.CHRONICLE_DATA_DIR)
   : path.resolve(__dirname, '..', 'data');
-
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
 
 export const dbPath = process.env.DATABASE_PATH
   ? path.resolve(process.env.DATABASE_PATH)
   : path.join(dataDir, 'chronicle.db');
 
-export const db = new DatabaseSync(dbPath);
+// Database instances
+let sqliteInstance = null;
+let pgPoolInstance = null;
 
-// Initialize schema
-export function initDb() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sites (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      domain TEXT,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS cues (
-      id TEXT PRIMARY KEY,
-      site_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      placement_type TEXT NOT NULL, -- 'top_banner', 'selector'
-      target_selector TEXT,         -- e.g. '#notice-board', 'header'
-      action TEXT DEFAULT 'prepend', -- 'prepend', 'append', 'replace'
-      content_html TEXT NOT NULL,
-      css_styles TEXT,
-      start_at TEXT NOT NULL,       -- ISO8601 UTC
-      end_at TEXT NOT NULL,         -- ISO8601 UTC
-      is_active INTEGER DEFAULT 1,  -- 1 = enabled, 0 = disabled
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_cues_site ON cues(site_id);
-    CREATE INDEX IF NOT EXISTS idx_cues_timing ON cues(site_id, is_active, start_at, end_at);
-  `);
+/**
+ * Returns true if the environment is configured to use PostgreSQL (Neon)
+ */
+export function isPostgresDatabase() {
+  const url = process.env.DATABASE_URL;
+  return Boolean(
+    url &&
+    (url.startsWith('postgres://') || url.startsWith('postgresql://'))
+  );
 }
 
-// Site helpers
-export function getSite(siteId) {
-  const stmt = db.prepare('SELECT * FROM sites WHERE id = ?');
-  return stmt.get(siteId);
+/**
+ * Returns active database type ('postgres' or 'sqlite')
+ */
+export function getDatabaseType() {
+  return isPostgresDatabase() ? 'postgres' : 'sqlite';
 }
 
-export function upsertSite({ id, name, domain }) {
-  const existing = getSite(id);
-  const now = new Date().toISOString();
-  if (existing) {
-    const stmt = db.prepare('UPDATE sites SET name = ?, domain = ? WHERE id = ?');
-    stmt.run(name, domain || '', id);
-    return getSite(id);
+/**
+ * Get or initialize SQLite instance
+ */
+function getSqliteDb() {
+  if (!sqliteInstance) {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    sqliteInstance = new DatabaseSync(dbPath);
+  }
+  return sqliteInstance;
+}
+
+/**
+ * Get or initialize PostgreSQL pool (supports Neon SSL)
+ */
+function getPgPool() {
+  if (!pgPoolInstance) {
+    const connectionString = process.env.DATABASE_URL;
+    const isLocalhost = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
+
+    pgPoolInstance = new Pool({
+      connectionString,
+      ssl: isLocalhost ? false : { rejectUnauthorized: false }
+    });
+  }
+  return pgPoolInstance;
+}
+
+/**
+ * Allow test suites to inject an in-memory PostgreSQL pool (e.g. pg-mem)
+ */
+export function setTestPgPool(customPool) {
+  pgPoolInstance = customPool;
+}
+
+/**
+ * Close database connections (for test teardowns and process shutdown)
+ */
+export async function closeDb() {
+  if (pgPoolInstance) {
+    await pgPoolInstance.end().catch(() => {});
+    pgPoolInstance = null;
+  }
+  if (sqliteInstance) {
+    sqliteInstance.close();
+    sqliteInstance = null;
+  }
+}
+
+/**
+ * Reset instances (used by tests switching between adapters)
+ */
+export function resetDatabaseInstances() {
+  sqliteInstance = null;
+  pgPoolInstance = null;
+}
+
+const COMMON_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS sites (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    domain TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS cues (
+    id TEXT PRIMARY KEY,
+    site_id TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    placement_type TEXT NOT NULL,
+    target_selector TEXT,
+    action TEXT DEFAULT 'prepend',
+    content_html TEXT NOT NULL,
+    css_styles TEXT,
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_cues_site ON cues(site_id);
+  CREATE INDEX IF NOT EXISTS idx_cues_timing ON cues(site_id, is_active, start_at, end_at);
+`;
+
+/**
+ * Initialize schema for active database
+ */
+export async function initDb() {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    await pool.query(COMMON_SCHEMA);
   } else {
-    const stmt = db.prepare('INSERT INTO sites (id, name, domain, created_at) VALUES (?, ?, ?, ?)');
-    stmt.run(id, name, domain || '', now);
+    const db = getSqliteDb();
+    db.exec(COMMON_SCHEMA);
+  }
+}
+
+/* =======================================================================
+   SITE OPERATIONS
+======================================================================= */
+
+export async function getSite(siteId) {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query('SELECT * FROM sites WHERE id = $1', [siteId]);
+    return res.rows[0] || null;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('SELECT * FROM sites WHERE id = ?');
+    return stmt.get(siteId) || null;
+  }
+}
+
+export async function upsertSite({ id, name, domain }) {
+  const now = new Date().toISOString();
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query(`
+      INSERT INTO sites (id, name, domain, created_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (id) DO UPDATE SET name = $2, domain = $3
+      RETURNING *
+    `, [id, name, domain || '', now]);
+    return res.rows[0];
+  } else {
+    const db = getSqliteDb();
+    const existing = await getSite(id);
+    if (existing) {
+      const stmt = db.prepare('UPDATE sites SET name = ?, domain = ? WHERE id = ?');
+      stmt.run(name, domain || '', id);
+    } else {
+      const stmt = db.prepare('INSERT INTO sites (id, name, domain, created_at) VALUES (?, ?, ?, ?)');
+      stmt.run(id, name, domain || '', now);
+    }
     return getSite(id);
   }
 }
 
-export function listSites() {
-  const stmt = db.prepare('SELECT * FROM sites ORDER BY created_at DESC');
-  return stmt.all();
+export async function listSites() {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query('SELECT * FROM sites ORDER BY created_at DESC');
+    return res.rows;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('SELECT * FROM sites ORDER BY created_at DESC');
+    return stmt.all();
+  }
 }
 
-// Cue helpers
-export function createCue({
+export async function deleteSite(siteId) {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    await pool.query('DELETE FROM sites WHERE id = $1', [siteId]);
+    return true;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('DELETE FROM sites WHERE id = ?');
+    stmt.run(siteId);
+    return true;
+  }
+}
+
+/* =======================================================================
+   CUE OPERATIONS
+======================================================================= */
+
+export async function createCue({
   id,
   site_id,
   title,
@@ -90,41 +221,83 @@ export function createCue({
 }) {
   const cueId = id || 'cue_' + Math.random().toString(36).substring(2, 10);
   const now = new Date().toISOString();
-  const stmt = db.prepare(`
-    INSERT INTO cues (
-      id, site_id, title, placement_type, target_selector,
-      action, content_html, css_styles, start_at, end_at, is_active, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  stmt.run(
-    cueId,
-    site_id,
-    title,
-    placement_type,
-    target_selector,
-    action,
-    content_html,
-    css_styles,
-    start_at,
-    end_at,
-    is_active ? 1 : 0,
-    now
-  );
-  return getCue(cueId);
+
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query(`
+      INSERT INTO cues (
+        id, site_id, title, placement_type, target_selector,
+        action, content_html, css_styles, start_at, end_at, is_active, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      RETURNING *
+    `, [
+      cueId,
+      site_id,
+      title,
+      placement_type,
+      target_selector,
+      action,
+      content_html,
+      css_styles,
+      start_at,
+      end_at,
+      is_active ? 1 : 0,
+      now
+    ]);
+    return res.rows[0];
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare(`
+      INSERT INTO cues (
+        id, site_id, title, placement_type, target_selector,
+        action, content_html, css_styles, start_at, end_at, is_active, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run(
+      cueId,
+      site_id,
+      title,
+      placement_type,
+      target_selector,
+      action,
+      content_html,
+      css_styles,
+      start_at,
+      end_at,
+      is_active ? 1 : 0,
+      now
+    );
+    return getCue(cueId);
+  }
 }
 
-export function getCue(id) {
-  const stmt = db.prepare('SELECT * FROM cues WHERE id = ?');
-  return stmt.get(id);
+export async function getCue(id) {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query('SELECT * FROM cues WHERE id = $1', [id]);
+    return res.rows[0] || null;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('SELECT * FROM cues WHERE id = ?');
+    return stmt.get(id) || null;
+  }
 }
 
-export function deleteCue(id) {
-  const stmt = db.prepare('DELETE FROM cues WHERE id = ?');
-  return stmt.run(id);
+export async function deleteCue(id) {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    await pool.query('DELETE FROM cues WHERE id = $1', [id]);
+    return true;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('DELETE FROM cues WHERE id = ?');
+    stmt.run(id);
+    return true;
+  }
 }
 
-export function updateCue(id, updates) {
-  const existing = getCue(id);
+export async function updateCue(id, updates) {
+  const existing = await getCue(id);
   if (!existing) return null;
 
   const title = updates.title !== undefined ? updates.title : existing.title;
@@ -137,63 +310,106 @@ export function updateCue(id, updates) {
   const end_at = updates.end_at !== undefined ? updates.end_at : existing.end_at;
   const is_active = updates.is_active !== undefined ? (updates.is_active ? 1 : 0) : existing.is_active;
 
-  const stmt = db.prepare(`
-    UPDATE cues SET
-      title = ?,
-      placement_type = ?,
-      target_selector = ?,
-      action = ?,
-      content_html = ?,
-      css_styles = ?,
-      start_at = ?,
-      end_at = ?,
-      is_active = ?
-    WHERE id = ?
-  `);
-  stmt.run(title, placement_type, target_selector, action, content_html, css_styles, start_at, end_at, is_active, id);
-  return getCue(id);
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query(`
+      UPDATE cues SET
+        title = $1,
+        placement_type = $2,
+        target_selector = $3,
+        action = $4,
+        content_html = $5,
+        css_styles = $6,
+        start_at = $7,
+        end_at = $8,
+        is_active = $9
+      WHERE id = $10
+      RETURNING *
+    `, [title, placement_type, target_selector, action, content_html, css_styles, start_at, end_at, is_active, id]);
+    return res.rows[0];
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare(`
+      UPDATE cues SET
+        title = ?,
+        placement_type = ?,
+        target_selector = ?,
+        action = ?,
+        content_html = ?,
+        css_styles = ?,
+        start_at = ?,
+        end_at = ?,
+        is_active = ?
+      WHERE id = ?
+    `);
+    stmt.run(title, placement_type, target_selector, action, content_html, css_styles, start_at, end_at, is_active, id);
+    return getCue(id);
+  }
 }
 
-export function toggleCueActive(id, forcedState = null) {
-  const existing = getCue(id);
+export async function toggleCueActive(id, forcedState = null) {
+  const existing = await getCue(id);
   if (!existing) return null;
   const newState = forcedState !== null ? (forcedState ? 1 : 0) : (existing.is_active ? 0 : 1);
-  const stmt = db.prepare('UPDATE cues SET is_active = ? WHERE id = ?');
-  stmt.run(newState, id);
-  return getCue(id);
+
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query('UPDATE cues SET is_active = $1 WHERE id = $2 RETURNING *', [newState, id]);
+    return res.rows[0];
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('UPDATE cues SET is_active = ? WHERE id = ?');
+    stmt.run(newState, id);
+    return getCue(id);
+  }
 }
 
-export function deleteSite(siteId) {
-  const stmt = db.prepare('DELETE FROM sites WHERE id = ?');
-  return stmt.run(siteId);
-}
-
-export function listCuesForSite(siteId) {
-  const stmt = db.prepare('SELECT * FROM cues WHERE site_id = ? ORDER BY start_at ASC');
-  return stmt.all(siteId);
+export async function listCuesForSite(siteId) {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query('SELECT * FROM cues WHERE site_id = $1 ORDER BY start_at ASC', [siteId]);
+    return res.rows;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare('SELECT * FROM cues WHERE site_id = ? ORDER BY start_at ASC');
+    return stmt.all(siteId);
+  }
 }
 
 /**
  * Returns currently active cues and upcoming cues (within lookaheadMs)
  * with server-side time validation.
  */
-export function getCuesForDelivery(siteId, lookaheadMs = 24 * 60 * 60 * 1000) {
+export async function getCuesForDelivery(siteId, lookaheadMs = 24 * 60 * 60 * 1000) {
   const now = new Date();
   const nowIso = now.toISOString();
   const lookaheadIso = new Date(now.getTime() + lookaheadMs).toISOString();
 
-  // Active cues (start_at <= now < end_at)
-  // Upcoming cues (now < start_at <= lookahead)
-  const stmt = db.prepare(`
-    SELECT * FROM cues
-    WHERE site_id = ?
-      AND is_active = 1
-      AND end_at > ?
-      AND start_at <= ?
-    ORDER BY start_at ASC
-  `);
+  let cues = [];
 
-  const cues = stmt.all(siteId, nowIso, lookaheadIso);
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    const res = await pool.query(`
+      SELECT * FROM cues
+      WHERE site_id = $1
+        AND is_active = 1
+        AND end_at > $2
+        AND start_at <= $3
+      ORDER BY start_at ASC
+    `, [siteId, nowIso, lookaheadIso]);
+    cues = res.rows;
+  } else {
+    const db = getSqliteDb();
+    const stmt = db.prepare(`
+      SELECT * FROM cues
+      WHERE site_id = ?
+        AND is_active = 1
+        AND end_at > ?
+        AND start_at <= ?
+      ORDER BY start_at ASC
+    `);
+    cues = stmt.all(siteId, nowIso, lookaheadIso);
+  }
 
   return cues.map(cue => {
     const isCurrentlyActive = cue.start_at <= nowIso && cue.end_at > nowIso;
