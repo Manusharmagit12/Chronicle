@@ -100,6 +100,25 @@
           <p class="sim-subtitle">Simulate real-time cue schedules and observe zero-reload DOM updates.</p>
         </div>
 
+        <!-- Connection Status & Target Engine -->
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.8rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="color: #94a3b8; font-size: 0.72rem; text-transform: uppercase; font-weight: 700;">Chronicle Server:</span>
+            <span id="conn-status-badge" style="color: #34d399; font-weight: 600; font-size: 0.72rem;">● Connected</span>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 6px;">
+            <input type="text" id="input-api-url" style="background: #0b0f19; border: 1px solid rgba(255,255,255,0.12); color: #93c5fd; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; flex: 1;" placeholder="http://localhost:3000 or Render URL">
+            <button type="button" id="btn-save-api" style="background: #2563eb; color: #fff; border: none; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; font-weight: 600;">Connect</button>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input type="password" id="input-admin-key" style="background: #0b0f19; border: 1px solid rgba(255,255,255,0.12); color: #cbd5e1; padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; flex: 1;" placeholder="ADMIN_API_KEY (optional)">
+            <button type="button" id="btn-save-key" style="background: rgba(255,255,255,0.08); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer;">Save</button>
+          </div>
+          <div style="margin-top: 8px; text-align: right;">
+            <a id="link-to-dashboard" href="/dashboard" style="color: #60a5fa; font-size: 0.75rem; text-decoration: underline;">⚙️ Open Management Dashboard &rarr;</a>
+          </div>
+        </div>
+
         <!-- Clock & Sync Status -->
         <div class="clock-box">
           <div class="clock-item">
@@ -152,29 +171,77 @@
 
   <!-- Dynamically inject Chronicle Embed Script based on runtime config -->
   <script>
-    (function() {
-      const cfg = window.CHRONICLE_CONFIG || {
-        apiUrl: 'http://localhost:3000',
-        siteKey: 'apex-university'
-      };
+    function resolveChronicleUrl() {
+      const saved = localStorage.getItem('chronicle_demo_api_url');
+      if (saved) return saved.replace(/\/+$/, '');
+      if (window.CHRONICLE_CONFIG && window.CHRONICLE_CONFIG.apiUrl) {
+        return window.CHRONICLE_CONFIG.apiUrl.replace(/\/+$/, '');
+      }
+      return window.location.origin;
+    }
 
-      const script = document.createElement('script');
-      script.src = `${cfg.apiUrl}/chronicle.js`;
-      script.setAttribute('data-site-key', cfg.siteKey);
-      script.setAttribute('data-api-url', cfg.apiUrl);
-      document.head.appendChild(script);
-    })();
+    const currentApiUrl = resolveChronicleUrl();
+    const siteKey = (window.CHRONICLE_CONFIG && window.CHRONICLE_CONFIG.siteKey) || 'apex-university';
+
+    // Inject embed script
+    const script = document.createElement('script');
+    script.src = `${currentApiUrl}/chronicle.js`;
+    script.setAttribute('data-site-key', siteKey);
+    script.setAttribute('data-api-url', currentApiUrl);
+    document.head.appendChild(script);
   </script>
 
   <!-- Script for the Demo Testbed Controller -->
   <script>
-    const cfg = window.CHRONICLE_CONFIG || { apiUrl: 'http://localhost:3000', siteKey: 'apex-university' };
-    const CHRONICLE_API = `${cfg.apiUrl}/api/v1`;
-    const SITE_KEY = cfg.siteKey;
+    const CHRONICLE_API = `${currentApiUrl}/api/v1`;
+    const SITE_KEY = siteKey;
 
     const serverClockEl = document.getElementById('server-clock');
     const activeCountEl = document.getElementById('active-count');
     const eventLogEl = document.getElementById('event-log');
+    const connStatusBadge = document.getElementById('conn-status-badge');
+    const inputApiUrl = document.getElementById('input-api-url');
+    const btnSaveApi = document.getElementById('btn-save-api');
+    const inputAdminKey = document.getElementById('input-admin-key');
+    const btnSaveKey = document.getElementById('btn-save-key');
+    const linkToDashboard = document.getElementById('link-to-dashboard');
+
+    // Initialize UI fields
+    inputApiUrl.value = currentApiUrl;
+    inputAdminKey.value = localStorage.getItem('chronicle_demo_admin_key') || '';
+    if (linkToDashboard) {
+      linkToDashboard.href = `${currentApiUrl}/dashboard`;
+    }
+
+    btnSaveApi.addEventListener('click', () => {
+      const val = inputApiUrl.value.trim().replace(/\/+$/, '');
+      if (!val) {
+        localStorage.removeItem('chronicle_demo_api_url');
+      } else {
+        localStorage.setItem('chronicle_demo_api_url', val);
+      }
+      window.location.reload();
+    });
+
+    btnSaveKey.addEventListener('click', () => {
+      const key = inputAdminKey.value.trim();
+      if (!key) {
+        localStorage.removeItem('chronicle_demo_admin_key');
+        logEvent('info', 'Admin API Key cleared from browser.');
+      } else {
+        localStorage.setItem('chronicle_demo_admin_key', key);
+        logEvent('synced', 'Admin API Key saved for test triggers.');
+      }
+    });
+
+    function getAuthHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const key = localStorage.getItem('chronicle_demo_admin_key');
+      if (key) {
+        headers['x-chronicle-admin-key'] = key;
+      }
+      return headers;
+    }
 
     function logEvent(type, message) {
       const timeStr = new Date().toLocaleTimeString();
@@ -200,6 +267,8 @@
       const { cues } = e.detail;
       const active = cues.filter(c => c.status === 'active').length;
       const upcoming = cues.filter(c => c.status === 'upcoming').length;
+      connStatusBadge.textContent = '● Connected';
+      connStatusBadge.style.color = '#34d399';
       logEvent('synced', `Synced: <strong>${active} active</strong>, <strong>${upcoming} upcoming</strong> cues.`);
     });
 
@@ -227,7 +296,7 @@
         logEvent('info', `Scheduling Flash Banner: Starts in 10s, ends in 35s...`);
         const res = await fetch(`${CHRONICLE_API}/cues`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             site_id: SITE_KEY,
             title: 'Flash Sale: 50% Off Alumni Merchandise',
@@ -265,9 +334,13 @@
               btn.querySelector('.btn-schedule-desc').textContent = `Starts in 10s • Auto-removes in 25s • No page reload`;
             }
           }, 1000);
+        } else if (res.status === 401) {
+          logEvent('expired', `Unauthorized (401): Admin API Key required. Enter key above to test triggers.`);
+          btn.style.opacity = '1';
+          btn.disabled = false;
         } else {
-          const err = await res.json();
-          logEvent('expired', `Error: ${err.error}`);
+          const err = await res.json().catch(() => ({}));
+          logEvent('expired', `Error: ${err.error || res.statusText}`);
           btn.style.opacity = '1';
           btn.disabled = false;
         }
@@ -292,7 +365,7 @@
         logEvent('info', `Scheduling In-Page Notice in #notice-board (starts in 10s)...`);
         const res = await fetch(`${CHRONICLE_API}/cues`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             site_id: SITE_KEY,
             title: 'Emergency Lab Maintenance Warning',
@@ -330,9 +403,13 @@
               btn.querySelector('.btn-schedule-desc').textContent = `Prepends in 10s • Auto-removes in 25s • No page reload`;
             }
           }, 1000);
+        } else if (res.status === 401) {
+          logEvent('expired', `Unauthorized (401): Admin API Key required. Enter key above to test triggers.`);
+          btn.style.opacity = '1';
+          btn.disabled = false;
         } else {
-          const err = await res.json();
-          logEvent('expired', `Error: ${err.error}`);
+          const err = await res.json().catch(() => ({}));
+          logEvent('expired', `Error: ${err.error || res.statusText}`);
           btn.style.opacity = '1';
           btn.disabled = false;
         }
@@ -348,16 +425,28 @@
       try {
         logEvent('info', 'Resetting cues to initial seed state...');
         // Fetch all cues and delete them
-        const allRes = await fetch(`${CHRONICLE_API}/cues/all?siteKey=${SITE_KEY}`);
-        const data = await allRes.json();
-        for (const cue of data.cues) {
-          await fetch(`${CHRONICLE_API}/cues/${cue.id}`, { method: 'DELETE' });
+        const allRes = await fetch(`${CHRONICLE_API}/cues/all?siteKey=${SITE_KEY}`, {
+          headers: getAuthHeaders()
+        });
+        if (allRes.status === 401) {
+          logEvent('expired', 'Unauthorized (401): Admin API Key required to reset cues.');
+          return;
         }
+        const data = await allRes.json();
+        if (data.cues) {
+          for (const cue of data.cues) {
+            await fetch(`${CHRONICLE_API}/cues/${cue.id}`, {
+              method: 'DELETE',
+              headers: getAuthHeaders()
+            });
+          }
+        }
+
         // Re-create default top banner
         const now = Date.now();
         await fetch(`${CHRONICLE_API}/cues`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             id: 'cue-banner-active',
             site_id: SITE_KEY,
@@ -369,6 +458,12 @@
                 <span>🎓 <strong>Apex Admissions Open:</strong> Applications for Spring & Fall cohorts are now live. Priority deadline ends in 2 weeks!</span>
                 <a href="#admissions" style="color:#60a5fa; text-decoration:underline; font-weight:600; margin-left:8px;">View Programs &rarr;</a>
               </div>
+            `,
+            css_styles: `
+              .chronicle-top-banner {
+                background: linear-gradient(90deg, #0f172a 0%, #1e1b4b 100%) !important;
+                border-bottom: 1px solid rgba(99, 102, 241, 0.3) !important;
+              }
             `,
             start_at: new Date(now - 10 * 60 * 1000).toISOString(),
             end_at: new Date(now + 2 * 60 * 60 * 1000).toISOString()

@@ -29,6 +29,29 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.resolve(__dirname, '..', 'public', 'dashboard', 'index.html'));
 });
 
+// Dynamic config endpoint for demo site and embed scripts
+app.get('/config.js', (req, res) => {
+  const chronicleUrl = (
+    process.env.CHRONICLE_PUBLIC_URL ||
+    process.env.CHRONICLE_API_URL ||
+    ''
+  ).replace(/\/+$/, '');
+  const siteKey = process.env.CHRONICLE_SITE_KEY || 'apex-university';
+
+  res.type('application/javascript').send(`
+    window.CHRONICLE_CONFIG = {
+      apiUrl: ${JSON.stringify(chronicleUrl)},
+      siteKey: ${JSON.stringify(siteKey)}
+    };
+  `);
+});
+
+// Serve live demo website directly on /demo
+app.use('/demo', express.static(path.resolve(__dirname, '..', 'demo-site', 'public')));
+app.get('/demo', (req, res) => {
+  res.sendFile(path.resolve(__dirname, '..', 'demo-site', 'public', 'index.html'));
+});
+
 app.get('/', (req, res) => {
   res.redirect('/dashboard');
 });

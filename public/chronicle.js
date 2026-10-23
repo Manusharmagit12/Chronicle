@@ -149,16 +149,30 @@
         if (!state.renderedCues.has(cue.id)) {
           mountCue(cue);
         } else {
-          // If content, styling, or title changed during an edit, refresh the DOM node
+          // If content, styling, or title changed during an edit, update in-place smoothly
           const current = state.renderedCues.get(cue.id);
-          if (
-            current &&
-            (current.cue.content_html !== cue.content_html ||
-             current.cue.css_styles !== cue.css_styles ||
-             current.cue.title !== cue.title)
-          ) {
-            removeCueFromDOM(cue.id, 'updated');
-            mountCue(cue);
+          if (current) {
+            current.cue = cue;
+            if (cue.placement_type === 'top_banner') {
+              const contentEl = current.element.querySelector('.chronicle-banner-content');
+              if (contentEl && contentEl.innerHTML !== cue.content_html) {
+                contentEl.innerHTML = cue.content_html;
+              }
+              let styleEl = current.element.querySelector('style');
+              if (cue.css_styles) {
+                if (!styleEl) {
+                  styleEl = document.createElement('style');
+                  current.element.appendChild(styleEl);
+                }
+                styleEl.textContent = cue.css_styles;
+              } else if (styleEl) {
+                styleEl.remove();
+              }
+            } else if (cue.placement_type === 'selector') {
+              if (current.element.innerHTML !== cue.content_html) {
+                current.element.innerHTML = cue.content_html;
+              }
+            }
           }
         }
 

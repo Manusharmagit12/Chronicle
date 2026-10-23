@@ -241,8 +241,12 @@
     currentSiteIdBadge.textContent = site.id;
     currentSiteDomainEl.textContent = `Target origin: ${site.domain || 'All origins'}`;
 
-    if (linkDemoSite && site.domain && site.domain.startsWith('http')) {
-      linkDemoSite.href = site.domain;
+    if (linkDemoSite) {
+      if (site.domain && site.domain.startsWith('http') && !site.domain.includes('localhost:3001')) {
+        linkDemoSite.href = site.domain;
+      } else {
+        linkDemoSite.href = '/demo';
+      }
     }
 
     // Use production public URL if configured, otherwise fallback to current origin
