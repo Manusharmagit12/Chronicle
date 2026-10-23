@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chronicle Dashboard — Content, On Cue</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-section">
+        <div class="brand-logo">⏱️</div>
+        <div class="brand-text">
+          <h1>Chronicle</h1>
+          <p>Content, On Cue</p>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Live Server Time -->
+        <div class="server-clock-badge" title="Synchronized with Chronicle Engine server clock">
+          <span class="pulse-dot"></span>
+          <span>Server UTC: </span>
+          <strong id="server-clock-val">--:--:--</strong>
+        </div>
+
+        <!-- Website Selector -->
+        <div class="site-switcher">
+          <label for="site-select" style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">Site:</label>
+          <select id="site-select"></select>
+        </div>
+
+        <button class="btn btn-secondary btn-sm" id="btn-add-site">+ New Site</button>
+        <button class="btn btn-secondary btn-sm" id="btn-auth-action" style="display: none;">🔒 Login</button>
+        <a href="http://localhost:3001" target="_blank" class="btn btn-secondary btn-sm" id="link-demo-site" title="Open external demo site">
+          🏛️ Open Demo Site &rarr;
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Dashboard Main Container -->
+  <main class="dashboard-container">
+
+    <!-- Active Site & Embed Integration Overview -->
+    <section class="site-overview-card">
+      <div class="site-meta">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <h2 id="current-site-name">Apex Institute of Technology</h2>
+          <span id="current-site-id-badge" class="placement-tag">apex-university</span>
+        </div>
+        <p id="current-site-domain">Target origin: http://localhost:3001</p>
+      </div>
+
+      <div class="embed-code-wrapper">
+        <code id="embed-code-text">&lt;script src="http://localhost:3000/chronicle.js" data-site-key="apex-university"&gt;&lt;/script&gt;</code>
+        <button class="btn btn-secondary btn-sm" id="btn-copy-embed">Copy Snippet</button>
+      </div>
+    </section>
+
+    <!-- Controls Bar: Filter Tabs & New Cue Action -->
+    <section class="controls-bar">
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">
+          <span>All Cues</span>
+          <span class="tab-count" id="count-all">0</span>
+        </button>
+        <button class="filter-tab" data-filter="active">
+          <span>Active</span>
+          <span class="tab-count" id="count-active">0</span>
+        </button>
+        <button class="filter-tab" data-filter="upcoming">
+          <span>Upcoming</span>
+          <span class="tab-count" id="count-upcoming">0</span>
+        </button>
+        <button class="filter-tab" data-filter="expired">
+          <span>Expired</span>
+          <span class="tab-count" id="count-expired">0</span>
+        </button>
+        <button class="filter-tab" data-filter="paused">
+          <span>Paused</span>
+          <span class="tab-count" id="count-paused">0</span>
+        </button>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button class="btn btn-secondary" id="btn-refresh-cues">🔄 Sync</button>
+        <button class="btn btn-primary" id="btn-create-cue">⚡ Schedule Content</button>
+      </div>
+    </section>
+
+    <!-- Cues Listing Area -->
+    <section class="cues-list" id="cues-container">
+      <!-- Dynamically generated cue cards -->
+    </section>
+
+    <!-- Empty State -->
+    <div class="empty-state" id="empty-state" style="display: none;">
+      <div class="empty-icon">📭</div>
+      <h3>No scheduled cues found</h3>
+      <p>Schedule banners, alerts, or in-page content to appear on cue.</p>
+      <button class="btn btn-primary" id="btn-empty-create">+ Schedule Your First Cue</button>
+    </div>
+
+  </main>
+
+  <!-- ================= MODAL: CREATE / EDIT CUE ================= -->
+  <div class="modal-overlay" id="modal-cue">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-cue-title">Schedule Timed Content</h3>
+        <button class="modal-close" data-close-modal="modal-cue">&times;</button>
+      </div>
+      <form id="form-cue">
+        <div class="modal-body">
+          <input type="hidden" id="cue-id">
+
+          <!-- Title -->
+          <div class="form-group">
+            <label for="cue-input-title">Cue Title / Campaign Name</label>
+            <input type="text" id="cue-input-title" class="form-control" placeholder="e.g. Flash Midterm Announcement" required>
+          </div>
+
+          <!-- Placement Row -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cue-input-placement">Placement Type</label>
+              <select id="cue-input-placement" class="form-control">
+                <option value="top_banner">Top Announcement Banner</option>
+                <option value="selector">CSS Element Target (In-Page)</option>
+              </select>
+            </div>
+
+            <div class="form-group" id="selector-group" style="display: none;">
+              <label for="cue-input-selector">Target CSS Selector</label>
+              <input type="text" id="cue-input-selector" class="form-control" placeholder="e.g. #notice-board, .hero-slot" value="#notice-board">
+            </div>
+          </div>
+
+          <!-- Action (if selector) -->
+          <div class="form-group" id="action-group" style="display: none;">
+            <label for="cue-input-action">Injection Action</label>
+            <select id="cue-input-action" class="form-control">
+              <option value="prepend">Prepend (Insert as first item inside target)</option>
+              <option value="append">Append (Insert as last item inside target)</option>
+              <option value="replace">Replace (Temporarily replace target content, restores on expiry)</option>
+            </select>
+          </div>
+
+          <!-- Message HTML -->
+          <div class="form-group">
+            <label for="cue-input-html">Content (HTML or Text)</label>
+            <textarea id="cue-input-html" class="form-control" rows="4" placeholder="Type announcement or HTML..." required></textarea>
+          </div>
+
+          <!-- Custom CSS (Optional) -->
+          <div class="form-group">
+            <label for="cue-input-css">Custom CSS Styles (Optional)</label>
+            <textarea id="cue-input-css" class="form-control" rows="2" placeholder="e.g. .chronicle-top-banner { background: #b91c1c !important; }"></textarea>
+          </div>
+
+          <!-- Timing Controls -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cue-input-start">Start Time</label>
+              <input type="datetime-local" id="cue-input-start" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label for="cue-input-end">Expiry Time</label>
+              <input type="datetime-local" id="cue-input-end" class="form-control" required>
+            </div>
+          </div>
+
+          <!-- Quick Timing Presets -->
+          <div class="form-group">
+            <span style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Quick Schedule Presets:</span>
+            <div class="quick-presets">
+              <button type="button" class="preset-chip" id="preset-10s">⚡ Starts in 10s (lasts 30s) — Instant Test</button>
+              <button type="button" class="preset-chip" id="preset-now-1h">⏱️ Starts Now (lasts 1 hour)</button>
+              <button type="button" class="preset-chip" id="preset-tomorrow">📅 Tomorrow at 9 AM (lasts 5 days)</button>
+            </div>
+          </div>
+
+          <!-- Live Preview Frame in Modal -->
+          <div class="form-group">
+            <label>Live Preview</label>
+            <div class="preview-container" id="modal-preview-box">
+              <em style="color:#64748b; font-size:0.85rem;">Type content above to see live preview...</em>
+            </div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-cue">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-save-cue">Save & Schedule Cue</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: REGISTER SITE ================= -->
+  <div class="modal-overlay" id="modal-site">
+    <div class="modal-box" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3>Register Website</h3>
+        <button class="modal-close" data-close-modal="modal-site">&times;</button>
+      </div>
+      <form id="form-site">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="site-input-name">Website Name</label>
+            <input type="text" id="site-input-name" class="form-control" placeholder="e.g. Apex Institute, Aura Store" required>
+          </div>
+          <div class="form-group">
+            <label for="site-input-id">Site Key / Identifier</label>
+            <input type="text" id="site-input-id" class="form-control" placeholder="e.g. apex-university, aura-store" required>
+            <small style="color:#64748b; font-size:0.75rem;">Used in data-site-key for the embed script.</small>
+          </div>
+          <div class="form-group">
+            <label for="site-input-domain">Target Domain / URL</label>
+            <input type="text" id="site-input-domain" class="form-control" placeholder="e.g. http://localhost:3001" value="http://localhost:3001">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-site">Cancel</button>
+          <button type="submit" class="btn btn-primary">Register Site</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: FULL PREVIEW ================= -->
+  <div class="modal-overlay" id="modal-preview">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="preview-modal-title">Cue Preview</h3>
+        <button class="modal-close" data-close-modal="modal-preview">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="full-preview-container" class="preview-container" style="min-height: 120px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-modal="modal-preview">Close</button>
+      </div>
+    </div>
+  <!-- ================= MODAL: ADMIN LOGIN ================= -->
+  <div class="modal-overlay" id="modal-auth">
+    <div class="modal-box" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3 id="auth-modal-title">Admin Authentication</h3>
+        <button class="modal-close" data-close-modal="modal-auth">&times;</button>
+      </div>
+      <form id="form-auth">
+        <div class="modal-body">
+          <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 14px;">
+            This Chronicle Engine is secured with an Admin API Key. Enter the key to obtain an ephemeral session token.
+          </p>
+          <div class="form-group">
+            <label for="auth-input-key">Admin API Key</label>
+            <input type="password" id="auth-input-key" class="form-control" placeholder="Enter ADMIN_API_KEY..." required autocomplete="current-password">
+          </div>
+          <div id="auth-error-msg" style="color: #ef4444; font-size: 0.8rem; display: none; margin-top: 6px;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close-modal="modal-auth">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btn-submit-auth">Authenticate</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "chronicle",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "demo": "node demo-site/server.js",
+    "seed": "node server/seed.js",
+    "verify": "node test/engine-verify.js",
+    "test:dashboard": "node test/dashboard-workflow.test.js",
+    "test:production": "node test/production-ready.test.js",
+    "test": "node test/engine-verify.js && node test/dashboard-workflow.test.js && node test/production-ready.test.js && node test/auth-unit.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.3.0"
+  }
+}
