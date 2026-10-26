@@ -685,8 +685,8 @@
     const startMs = now.getTime() + (startOffsetSec * 1000);
     const endMs = startMs + (durationSec * 1000);
 
-    if (cueStartInput) cueStartInput.setAttribute('step', '1');
-    if (cueEndInput) cueEndInput.setAttribute('step', '1');
+    if (cueStartInput) cueStartInput.setAttribute('step', 'any');
+    if (cueEndInput) cueEndInput.setAttribute('step', 'any');
 
     cueStartInput.value = isoToLocalDatetime(new Date(startMs).toISOString());
     cueEndInput.value = isoToLocalDatetime(new Date(endMs).toISOString());
@@ -699,7 +699,10 @@
   }
 
   function localDatetimeToIso(localStr) {
-    return new Date(localStr).toISOString();
+    if (!localStr) return null;
+    const d = new Date(localStr);
+    if (isNaN(d.getTime())) return null;
+    return d.toISOString();
   }
 
   /**
@@ -719,6 +722,7 @@
   async function handleCueSubmit(e) {
     e.preventDefault();
 
+    const btnSaveCue = document.getElementById('btn-save-cue');
     const title = cueTitleInput.value.trim();
     const placementType = cuePlacementInput.value;
     const targetSelector = cueSelectorInput.value.trim();
@@ -728,7 +732,7 @@
     const startAt = localDatetimeToIso(cueStartInput.value);
     const endAt = localDatetimeToIso(cueEndInput.value);
 
-    // Validation 1: Required fields
+    // Validation 1: Required fields & valid dates
     if (!title || !contentHtml || !startAt || !endAt) {
       alert('Please fill in all required fields (Title, Content, Start Time, Expiry Time).');
       return;
@@ -764,6 +768,11 @@
       end_at: endAt
     };
 
+    if (btnSaveCue) {
+      btnSaveCue.disabled = true;
+      btnSaveCue.textContent = 'Saving...';
+    }
+
     try {
       let res;
       if (isEditingCue) {
@@ -791,6 +800,11 @@
       await loadAuditLogs();
     } catch (err) {
       alert(`Error scheduling cue: ${err.message}`);
+    } finally {
+      if (btnSaveCue) {
+        btnSaveCue.disabled = false;
+        btnSaveCue.textContent = 'Save & Schedule Cue';
+      }
     }
   }
 

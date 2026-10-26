@@ -211,7 +211,7 @@
         <h3 id="modal-cue-title">Schedule Timed Content</h3>
         <button class="modal-close" data-close-modal="modal-cue">&times;</button>
       </div>
-      <form id="form-cue">
+      <form id="form-cue" novalidate>
         <div class="modal-body">
           <input type="hidden" id="cue-id">
 
@@ -287,11 +287,11 @@
           <div class="form-row">
             <div class="form-group">
               <label for="cue-input-start">Start Time</label>
-              <input type="datetime-local" id="cue-input-start" class="form-control" step="1" required>
+              <input type="datetime-local" id="cue-input-start" class="form-control" step="any" required>
             </div>
             <div class="form-group">
               <label for="cue-input-end">End Time (Expiry)</label>
-              <input type="datetime-local" id="cue-input-end" class="form-control" step="1" required>
+              <input type="datetime-local" id="cue-input-end" class="form-control" step="any" required>
             </div>
           </div>
 
