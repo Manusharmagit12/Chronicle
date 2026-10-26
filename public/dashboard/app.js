@@ -1,6 +1,7 @@
 /**
  * Chronicle Management Dashboard Logic
- * Fully integrated with server-side authentication, origin configuration, and persistent storage.
+ * Fully integrated with website connection tracking, SDK verification,
+ * server-side authentication, origin validation, and persistent storage.
  */
 (function () {
   'use strict';
@@ -18,20 +19,32 @@
   let authRequired = false;
   let isAuthenticated = false;
 
-  // DOM Elements
+  // DOM Elements - Navigation & Header
   const siteSelect = document.getElementById('site-select');
-  const currentSiteNameEl = document.getElementById('current-site-name');
-  const currentSiteIdBadge = document.getElementById('current-site-id-badge');
-  const currentSiteDomainEl = document.getElementById('current-site-domain');
-  const embedCodeText = document.getElementById('embed-code-text');
-  const btnCopyEmbed = document.getElementById('btn-copy-embed');
   const serverClockVal = document.getElementById('server-clock-val');
-  const cuesContainer = document.getElementById('cues-container');
-  const emptyState = document.getElementById('empty-state');
   const btnAuthAction = document.getElementById('btn-auth-action');
   const authAlertBanner = document.getElementById('auth-alert-banner');
   const btnBannerLogin = document.getElementById('btn-banner-login');
   const linkDemoSite = document.getElementById('link-demo-site');
+
+  // DOM Elements - Summary Metrics
+  const metricConnectedSites = document.getElementById('metric-connected-sites');
+  const metricTotalSites = document.getElementById('metric-total-sites');
+  const metricActiveCues = document.getElementById('metric-active-cues');
+  const metricScheduledCues = document.getElementById('metric-scheduled-cues');
+  const metricExpiredCues = document.getElementById('metric-expired-cues');
+
+  // DOM Elements - Active Site & Integration Overview
+  const currentSiteNameEl = document.getElementById('current-site-name');
+  const currentSiteIdBadge = document.getElementById('current-site-id-badge');
+  const currentSiteDomainEl = document.getElementById('current-site-domain');
+  const siteConnStatusBadge = document.getElementById('site-conn-status-badge');
+  const currentSiteKeyDisplay = document.getElementById('current-site-key-display');
+  const currentSiteHeartbeat = document.getElementById('current-site-heartbeat');
+  const embedCodeText = document.getElementById('embed-code-text');
+  const btnCopyEmbed = document.getElementById('btn-copy-embed');
+  const btnViewIntegration = document.getElementById('btn-view-integration');
+  const btnTestIntegrationQuick = document.getElementById('btn-test-integration-quick');
 
   // Filter tabs
   const filterTabs = document.querySelectorAll('.filter-tab');
@@ -41,10 +54,16 @@
   const countExpired = document.getElementById('count-expired');
   const countPaused = document.getElementById('count-paused');
 
+  // Cues Listing
+  const cuesContainer = document.getElementById('cues-container');
+  const emptyState = document.getElementById('empty-state');
+
   // Cue Form & Modal
   const modalCue = document.getElementById('modal-cue');
   const formCue = document.getElementById('form-cue');
   const modalCueTitle = document.getElementById('modal-cue-title');
+  const modalTargetSiteName = document.getElementById('modal-target-site-name');
+  const modalTargetSiteId = document.getElementById('modal-target-site-id');
   const cueIdInput = document.getElementById('cue-id');
   const cueTitleInput = document.getElementById('cue-input-title');
   const cuePlacementInput = document.getElementById('cue-input-placement');
@@ -57,6 +76,29 @@
   const cueStartInput = document.getElementById('cue-input-start');
   const cueEndInput = document.getElementById('cue-input-end');
   const modalPreviewBox = document.getElementById('modal-preview-box');
+
+  // Website Integration Modal Elements
+  const modalIntegration = document.getElementById('modal-integration');
+  const intgSiteName = document.getElementById('intg-site-name');
+  const intgSiteDomain = document.getElementById('intg-site-domain');
+  const intgStatusBadge = document.getElementById('intg-status-badge');
+  const intgSiteId = document.getElementById('intg-site-id');
+  const intgSiteKey = document.getElementById('intg-site-key');
+  const intgSdkVersion = document.getElementById('intg-sdk-version');
+  const intgLastSeen = document.getElementById('intg-last-seen');
+  const intgEmbedCode = document.getElementById('intg-embed-code');
+  const btnCopyIntgCode = document.getElementById('btn-copy-intg-code');
+  const btnTestIntegrationFromModal = document.getElementById('btn-test-integration-from-modal');
+
+  // Test Integration Modal Elements
+  const modalTestIntegration = document.getElementById('modal-test-integration');
+  const testChecklistContainer = document.getElementById('test-checklist-container');
+  const testSummaryMessage = document.getElementById('test-summary-message');
+  const btnRetestIntegration = document.getElementById('btn-retest-integration');
+
+  // Audit Feed Elements
+  const auditFeedList = document.getElementById('audit-feed-list');
+  const btnRefreshAudit = document.getElementById('btn-refresh-audit');
 
   // Site Modal
   const modalSite = document.getElementById('modal-site');
@@ -104,7 +146,13 @@
     await fetchServerConfig();
     await checkAuthStatus();
     await loadSites();
+    await loadAuditLogs();
     startClockSync();
+
+    // Auto-refresh site status & cues every 10 seconds to detect new heartbeats
+    setInterval(async () => {
+      await refreshCurrentSiteStatus();
+    }, 10000);
   }
 
   /**
@@ -184,14 +232,41 @@
   }
 
   /**
+   * Helper: Relative time formatter ("12s ago", "3m ago", "1h ago")
+   */
+  function formatRelativeTime(isoString) {
+    if (!isoString) return 'Never';
+    const pastMs = new Date(isoString).getTime();
+    const nowMs = getServerNow().getTime();
+    const diffSec = Math.max(0, Math.floor((nowMs - pastMs) / 1000));
+
+    if (diffSec < 10) return 'Just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const mins = Math.floor(diffSec / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  }
+
+  /**
+   * Helper: Checks if heartbeat timestamp was within the last 5 minutes
+   */
+  function isSiteConnected(lastSeenAt) {
+    if (!lastSeenAt) return false;
+    const pastMs = new Date(lastSeenAt).getTime();
+    const nowMs = getServerNow().getTime();
+    return (nowMs - pastMs) <= (5 * 60 * 1000);
+  }
+
+  /**
    * Load Registered Sites
    */
   async function loadSites() {
     try {
       const res = await apiFetch(`${API_BASE}/sites`);
-      if (res.status === 401) {
-        return; // Modal will be triggered by apiFetch
-      }
+      if (res.status === 401) return;
       const data = await res.json();
       sites = data.sites || [];
 
@@ -202,14 +277,15 @@
           name: 'Apex Institute of Technology',
           domain: 'http://localhost:3001'
         });
-        sites = [defaultSite];
+        if (defaultSite) sites = [defaultSite];
       }
 
       siteSelect.innerHTML = '';
       sites.forEach(s => {
         const opt = document.createElement('option');
         opt.value = s.id;
-        opt.textContent = `${s.name} (${s.id})`;
+        const connDot = isSiteConnected(s.last_seen_at) ? '🟢' : '⚪';
+        opt.textContent = `${connDot} ${s.name} (${s.id})`;
         siteSelect.appendChild(opt);
       });
 
@@ -223,16 +299,44 @@
       } else {
         currentSiteNameEl.textContent = 'No Registered Websites';
         currentSiteIdBadge.textContent = 'none';
-        currentSiteDomainEl.textContent = 'Register a website to generate an embed code';
-        embedCodeText.textContent = 'Register a website to generate snippet.';
+        currentSiteDomainEl.textContent = 'Register a website to connect Chronicle SDK';
+        embedCodeText.textContent = 'Register a website to generate SDK embed code.';
         allCues = [];
         renderCues();
       }
+
+      updateSummaryMetrics();
     } catch (err) {
       console.error('Failed to load sites:', err);
     }
   }
 
+  /**
+   * Refresh Current Site Status (Heartbeat & Metadata)
+   */
+  async function refreshCurrentSiteStatus() {
+    try {
+      const res = await apiFetch(`${API_BASE}/sites/${currentSiteId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const updatedSite = data.site;
+
+      // Update in local cache
+      const idx = sites.findIndex(s => s.id === updatedSite.id);
+      if (idx !== -1) {
+        sites[idx] = updatedSite;
+      }
+
+      updateSiteDetails();
+      updateSummaryMetrics();
+    } catch (e) {
+      // quiet fail on polling
+    }
+  }
+
+  /**
+   * Update Site Details in Dashboard View
+   */
   function updateSiteDetails() {
     const site = sites.find(s => s.id === currentSiteId);
     if (!site) return;
@@ -241,18 +345,68 @@
     currentSiteIdBadge.textContent = site.id;
     currentSiteDomainEl.textContent = `Target origin: ${site.domain || 'All origins'}`;
 
-    if (linkDemoSite) {
-      if (site.domain && site.domain.startsWith('http') && !site.domain.includes('localhost:3001')) {
-        linkDemoSite.href = site.domain;
-      } else {
-        linkDemoSite.href = '/demo';
-      }
+    // Target Website in Cue Modal
+    if (modalTargetSiteName) modalTargetSiteName.textContent = site.name;
+    if (modalTargetSiteId) modalTargetSiteId.textContent = `(${site.id})`;
+
+    // Connection badge & heartbeat
+    const connected = isSiteConnected(site.last_seen_at);
+    if (connected) {
+      siteConnStatusBadge.className = 'connection-pill status-connected';
+      siteConnStatusBadge.innerHTML = '🟢 Connected';
+      currentSiteHeartbeat.innerHTML = `SDK v${site.sdk_version || '1.1.0'} active • Heartbeat: ${formatRelativeTime(site.last_seen_at)}`;
+      currentSiteHeartbeat.style.color = '#34d399';
+    } else {
+      siteConnStatusBadge.className = 'connection-pill status-disconnected';
+      siteConnStatusBadge.innerHTML = '⚪ Not Connected';
+      currentSiteHeartbeat.innerHTML = site.last_seen_at
+        ? `Last seen: ${formatRelativeTime(site.last_seen_at)}`
+        : 'Last Heartbeat: Never received';
+      currentSiteHeartbeat.style.color = '#94a3b8';
     }
 
-    // Use production public URL if configured, otherwise fallback to current origin
+    const siteKey = site.site_key || site.id;
+    currentSiteKeyDisplay.textContent = `Key: ${siteKey.length > 18 ? siteKey.substring(0, 18) + '...' : siteKey}`;
+    currentSiteKeyDisplay.title = siteKey;
+
+    if (linkDemoSite) {
+      linkDemoSite.href = '/demo';
+    }
+
+    // Embed Snippet with dynamic host URL
     const baseUrl = serverPublicUrl || window.location.origin;
-    const snippet = `<script src="${baseUrl}/chronicle.js" data-site-key="${site.id}"></script>`;
+    const snippet = `<script src="${baseUrl}/chronicle.js" data-site-key="${siteKey}"></script>`;
     embedCodeText.textContent = snippet;
+  }
+
+  /**
+   * Update Summary Metrics Cards (Requirement 11)
+   */
+  function updateSummaryMetrics() {
+    const totalSites = sites.length;
+    const connectedCount = sites.filter(s => isSiteConnected(s.last_seen_at)).length;
+
+    if (metricConnectedSites) metricConnectedSites.textContent = connectedCount;
+    if (metricTotalSites) metricTotalSites.textContent = `/ ${totalSites} total`;
+
+    const nowIso = getServerNow().toISOString();
+    let active = 0, upcoming = 0, expired = 0, paused = 0;
+
+    allCues.forEach(cue => {
+      if (cue.is_active === 0) {
+        paused++;
+      } else if (cue.start_at <= nowIso && cue.end_at > nowIso) {
+        active++;
+      } else if (cue.start_at > nowIso) {
+        upcoming++;
+      } else {
+        expired++;
+      }
+    });
+
+    if (metricActiveCues) metricActiveCues.textContent = active;
+    if (metricScheduledCues) metricScheduledCues.textContent = upcoming;
+    if (metricExpiredCues) metricExpiredCues.textContent = expired;
   }
 
   /**
@@ -267,10 +421,12 @@
       allCues = data.cues || [];
       updateCounts();
       renderCues();
+      updateSummaryMetrics();
     } catch (err) {
       console.error('Failed to load cues:', err);
       allCues = [];
       renderCues();
+      updateSummaryMetrics();
     }
   }
 
@@ -324,6 +480,9 @@
     });
   }
 
+  /**
+   * Create Cue Card with Enhanced Lifecycle Visibility (Requirement 5)
+   */
   function createCueCard(cue, nowIso) {
     const card = document.createElement('div');
     card.className = 'cue-card';
@@ -335,7 +494,7 @@
 
     if (cue.is_active === 0) {
       status = 'paused';
-      statusLabel = 'Paused';
+      statusLabel = 'Disabled';
       statusClass = 'status-paused';
     } else if (cue.start_at <= nowIso && cue.end_at > nowIso) {
       status = 'active';
@@ -343,16 +502,16 @@
       statusClass = 'status-active';
     } else if (cue.start_at > nowIso) {
       status = 'upcoming';
-      statusLabel = 'Upcoming';
+      statusLabel = 'Scheduled';
       statusClass = 'status-upcoming';
     }
 
     const placementLabel = cue.placement_type === 'top_banner'
       ? 'Top Banner'
-      : `Selector: ${cue.target_selector} (${cue.action || 'prepend'})`;
+      : `Target: ${cue.target_selector || '#notice-board'} (${cue.action || 'append'})`;
 
-    const startLocal = new Date(cue.start_at).toLocaleString();
-    const endLocal = new Date(cue.end_at).toLocaleString();
+    const startLocal = new Date(cue.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + new Date(cue.start_at).toLocaleDateString();
+    const endLocal = new Date(cue.end_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + new Date(cue.end_at).toLocaleDateString();
 
     card.innerHTML = `
       <div class="cue-card-top">
@@ -365,7 +524,7 @@
           <button class="btn btn-secondary btn-sm btn-preview-cue" data-id="${cue.id}">👁️ Preview</button>
           <button class="btn btn-secondary btn-sm btn-edit-cue" data-id="${cue.id}">✏️ Edit</button>
           <button class="btn btn-secondary btn-sm btn-toggle-cue" data-id="${cue.id}" data-active="${cue.is_active}">
-            ${cue.is_active ? '⏸️ Pause' : '▶️ Resume'}
+            ${cue.is_active ? '⏸️ Disable' : '▶️ Enable'}
           </button>
           <button class="btn btn-danger btn-sm btn-delete-cue" data-id="${cue.id}">🗑️</button>
         </div>
@@ -382,7 +541,7 @@
             <span class="timing-val">${endLocal}</span>
           </div>
           <div class="timing-item">
-            <span class="timing-label">Live Status</span>
+            <span class="timing-label">Lifecycle Status</span>
             <span class="timing-val time-countdown" data-start="${cue.start_at}" data-end="${cue.end_at}" data-active="${cue.is_active}">
               Calculating...
             </span>
@@ -400,12 +559,15 @@
     return card;
   }
 
+  /**
+   * Dynamic Real-Time Countdown & Lifecycle Updates
+   */
   function updateTimeRemainingCounters() {
     const nowMs = getServerNow().getTime();
     document.querySelectorAll('.time-countdown').forEach(el => {
       const isActive = el.getAttribute('data-active') === '1';
       if (!isActive) {
-        el.textContent = '⏸️ Paused (Canceled)';
+        el.textContent = '⏸️ Disabled / Paused';
         el.style.color = '#f59e0b';
         return;
       }
@@ -414,15 +576,17 @@
       const endMs = new Date(el.getAttribute('data-end')).getTime();
 
       if (endMs <= nowMs) {
-        el.textContent = 'Past expiration';
+        const expiredSecAgo = Math.floor((nowMs - endMs) / 1000);
+        el.textContent = `Expired ${formatDuration(expiredSecAgo)} ago`;
         el.style.color = '#94a3b8';
       } else if (startMs <= nowMs && endMs > nowMs) {
+        const activeDurationSec = Math.floor((nowMs - startMs) / 1000);
         const remainingSec = Math.floor((endMs - nowMs) / 1000);
-        el.textContent = `🟢 Expires in: ${formatDuration(remainingSec)}`;
+        el.textContent = `🟢 Active for ${formatDuration(activeDurationSec)} • Ends in ${formatDuration(remainingSec)}`;
         el.style.color = '#34d399';
       } else {
         const untilStartSec = Math.floor((startMs - nowMs) / 1000);
-        el.textContent = `🔵 Starts in: ${formatDuration(untilStartSec)}`;
+        el.textContent = `🔵 Starts in ${formatDuration(untilStartSec)}`;
         el.style.color = '#60a5fa';
       }
     });
@@ -432,14 +596,14 @@
     if (totalSeconds < 60) return `${totalSeconds}s`;
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
-    if (mins < 60) return `${mins}m ${secs}s`;
+    if (mins < 60) return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
     const hrs = Math.floor(mins / 60);
     const remMins = mins % 60;
-    return `${hrs}h ${remMins}m`;
+    return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
   }
 
   /**
-   * Modal Handlers: Create / Edit Cue
+   * Modal Handlers: Create / Edit Cue (Requirement 4)
    */
   function openCreateCueModal() {
     if (authRequired && !isAuthenticated) {
@@ -450,16 +614,24 @@
     modalCueTitle.textContent = 'Schedule Timed Content';
     cueIdInput.value = '';
     cueTitleInput.value = '';
-    cuePlacementInput.value = 'top_banner';
-    selectorGroup.style.display = 'none';
-    actionGroup.style.display = 'none';
+    cuePlacementInput.value = 'selector';
+    selectorGroup.style.display = 'block';
+    actionGroup.style.display = 'block';
     cueSelectorInput.value = '#notice-board';
-    cueActionInput.value = 'prepend';
-    cueHtmlInput.value = '';
+    cueActionInput.value = 'append';
+    cueHtmlInput.value = '<div style="background:linear-gradient(135deg, #1e3a8a, #1e1b4b); color:#fff; padding:16px; border-radius:10px; border:1px solid rgba(99,102,241,0.4);"><h3 style="margin-bottom:6px; font-size:1.1rem; color:#93c5fd;">⚡ Flash Announcement</h3><p style="margin:0; font-size:0.9rem;">Limited Time Offer — 30% OFF all certifications this week!</p></div>';
     cueCssInput.value = '';
 
-    setFormTimingPreset(0, 3600);
+    // Default: 1-minute quick test demo
+    setFormTimingPreset(10, 70);
     updateModalPreview();
+
+    const site = sites.find(s => s.id === currentSiteId);
+    if (site) {
+      if (modalTargetSiteName) modalTargetSiteName.textContent = site.name;
+      if (modalTargetSiteId) modalTargetSiteId.textContent = `(${site.id})`;
+    }
+
     openModal('modal-cue');
   }
 
@@ -474,7 +646,7 @@
       selectorGroup.style.display = 'block';
       actionGroup.style.display = 'block';
       cueSelectorInput.value = cue.target_selector || '#notice-board';
-      cueActionInput.value = cue.action || 'prepend';
+      cueActionInput.value = cue.action || 'append';
     } else {
       selectorGroup.style.display = 'none';
       actionGroup.style.display = 'none';
@@ -501,144 +673,351 @@
 
     modalPreviewBox.innerHTML = `
       <style>${css}</style>
-      <div>${html}</div>
+      <div class="chronicle-preview-render">${html}</div>
     `;
   }
 
   function setFormTimingPreset(startOffsetSec, durationSec) {
-    const serverNow = getServerNow();
-    const startMs = serverNow.getTime() + (startOffsetSec * 1000);
+    const now = getServerNow();
+    const startMs = now.getTime() + (startOffsetSec * 1000);
     const endMs = startMs + (durationSec * 1000);
 
     cueStartInput.value = isoToLocalDatetime(new Date(startMs).toISOString());
     cueEndInput.value = isoToLocalDatetime(new Date(endMs).toISOString());
   }
 
-  function isoToLocalDatetime(isoString) {
-    const d = new Date(isoString);
-    const offset = d.getTimezoneOffset() * 60000;
-    const local = new Date(d.getTime() - offset);
-    return local.toISOString().slice(0, 16);
+  function isoToLocalDatetime(isoStr) {
+    const d = new Date(isoStr);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  function localDatetimeToIso(localString) {
-    const d = new Date(localString);
-    return d.toISOString();
+  function localDatetimeToIso(localStr) {
+    return new Date(localStr).toISOString();
   }
 
   /**
-   * Save Cue (Create or Update)
+   * Validation Helper: CSS Selector Format
+   */
+  function isValidCssSelector(selector) {
+    if (!selector || typeof selector !== 'string') return true;
+    const trimmed = selector.trim();
+    if (trimmed.length === 0) return true;
+    if (/[<>{};"']/.test(trimmed)) return false;
+    return /^[a-zA-Z0-9_\-\.\#\:\s\[\]\=\^\$\*\~\|\,\>\+\(\)]+$/.test(trimmed);
+  }
+
+  /**
+   * Handle Cue Form Submit with Strict Validation
    */
   async function handleCueSubmit(e) {
     e.preventDefault();
 
     const title = cueTitleInput.value.trim();
-    const placement_type = cuePlacementInput.value;
-    const target_selector = placement_type === 'selector' ? cueSelectorInput.value.trim() : '';
-    const action = placement_type === 'selector' ? cueActionInput.value : 'prepend';
-    const content_html = cueHtmlInput.value.trim();
-    const css_styles = cueCssInput.value.trim();
-    const start_at = localDatetimeToIso(cueStartInput.value);
-    const end_at = localDatetimeToIso(cueEndInput.value);
+    const placementType = cuePlacementInput.value;
+    const targetSelector = cueSelectorInput.value.trim();
+    const action = cueActionInput.value;
+    const contentHtml = cueHtmlInput.value.trim();
+    const cssStyles = cueCssInput.value.trim();
+    const startAt = localDatetimeToIso(cueStartInput.value);
+    const endAt = localDatetimeToIso(cueEndInput.value);
 
-    if (new Date(start_at) >= new Date(end_at)) {
-      alert('Expiry time must be after Start time.');
+    // Validation 1: Required fields
+    if (!title || !contentHtml || !startAt || !endAt) {
+      alert('Please fill in all required fields (Title, Content, Start Time, Expiry Time).');
       return;
+    }
+
+    // Validation 2: Timing
+    if (new Date(startAt).getTime() >= new Date(endAt).getTime()) {
+      alert('Start time must be strictly before expiry time.');
+      return;
+    }
+
+    // Validation 3: Target selector
+    if (placementType === 'selector') {
+      if (!targetSelector) {
+        alert('Please specify a target CSS selector (e.g. #notice-board).');
+        return;
+      }
+      if (!isValidCssSelector(targetSelector)) {
+        alert('Invalid target CSS selector format. Please use standard selector notation (e.g. #notice-board, .announcement-card).');
+        return;
+      }
     }
 
     const payload = {
       site_id: currentSiteId,
       title,
-      placement_type,
-      target_selector,
-      action,
-      content_html,
-      css_styles,
-      start_at,
-      end_at
+      placement_type: placementType,
+      target_selector: placementType === 'selector' ? targetSelector : '',
+      action: placementType === 'selector' ? action : 'prepend',
+      content_html: contentHtml,
+      css_styles: cssStyles,
+      start_at: startAt,
+      end_at: endAt
     };
 
     try {
-      if (isEditingCue && cueIdInput.value) {
-        const res = await apiFetch(`${API_BASE}/cues/${cueIdInput.value}`, {
+      let res;
+      if (isEditingCue) {
+        const id = cueIdInput.value;
+        res = await apiFetch(`${API_BASE}/cues/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (!res.ok) throw new Error((await res.json()).error);
       } else {
-        const res = await apiFetch(`${API_BASE}/cues`, {
+        res = await apiFetch(`${API_BASE}/cues`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        if (!res.ok) throw new Error((await res.json()).error);
+      }
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to save cue');
       }
 
       closeModal('modal-cue');
       await loadCues();
+      await loadAuditLogs();
     } catch (err) {
-      alert(`Error saving cue: ${err.message}`);
+      alert(`Error scheduling cue: ${err.message}`);
     }
   }
 
   /**
-   * Toggle / Cancel Cue
+   * Toggle Cue Active State
    */
-  async function toggleCue(cueId) {
+  async function toggleCue(id) {
     try {
-      const res = await apiFetch(`${API_BASE}/cues/${cueId}/toggle`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      if (!res.ok) throw new Error('Toggle failed');
-      await loadCues();
-    } catch (err) {
-      alert(`Error toggling cue: ${err.message}`);
+      const res = await apiFetch(`${API_BASE}/cues/${id}/toggle`, { method: 'PATCH' });
+      if (res.ok) {
+        await loadCues();
+        await loadAuditLogs();
+      }
+    } catch (e) {
+      console.error('Failed to toggle cue:', e);
     }
   }
 
   /**
    * Delete Cue
    */
-  async function deleteCue(cueId) {
+  async function deleteCue(id) {
     if (!confirm('Are you sure you want to permanently delete this cue?')) return;
     try {
-      const res = await apiFetch(`${API_BASE}/cues/${cueId}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Delete failed');
-      await loadCues();
-    } catch (err) {
-      alert(`Error deleting cue: ${err.message}`);
+      const res = await apiFetch(`${API_BASE}/cues/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await loadCues();
+        await loadAuditLogs();
+      }
+    } catch (e) {
+      console.error('Failed to delete cue:', e);
     }
   }
 
   /**
-   * Register Site
+   * Open Dedicated Website Integration Page Modal (Requirements 1 & 2)
    */
-  async function registerSite(siteData) {
-    const res = await apiFetch(`${API_BASE}/sites`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(siteData)
-    });
-    const data = await res.json();
-    return data.site;
+  function openWebsiteIntegrationModal() {
+    const site = sites.find(s => s.id === currentSiteId);
+    if (!site) return;
+
+    intgSiteName.textContent = site.name;
+    intgSiteDomain.textContent = site.domain ? `Target origin: ${site.domain}` : 'Target origin: Open to all origins';
+    intgSiteId.textContent = site.id;
+
+    const siteKey = site.site_key || site.id;
+    intgSiteKey.textContent = siteKey;
+    intgSdkVersion.textContent = site.sdk_version ? `v${site.sdk_version}` : 'v1.1.0';
+
+    const connected = isSiteConnected(site.last_seen_at);
+    if (connected) {
+      intgStatusBadge.className = 'connection-pill status-connected';
+      intgStatusBadge.innerHTML = '🟢 Connected';
+      intgLastSeen.textContent = `${formatRelativeTime(site.last_seen_at)} (${new Date(site.last_seen_at).toLocaleTimeString()})`;
+      intgLastSeen.style.color = '#34d399';
+    } else {
+      intgStatusBadge.className = 'connection-pill status-disconnected';
+      intgStatusBadge.innerHTML = '⚪ Not Connected';
+      intgLastSeen.textContent = site.last_seen_at
+        ? `${formatRelativeTime(site.last_seen_at)} (${new Date(site.last_seen_at).toLocaleTimeString()})`
+        : 'Never contacted';
+      intgLastSeen.style.color = '#94a3b8';
+    }
+
+    const baseUrl = serverPublicUrl || window.location.origin;
+    const snippet = `<script\n  src="${baseUrl}/chronicle.js"\n  data-site-key="${siteKey}">\n</script>`;
+    intgEmbedCode.textContent = snippet;
+
+    openModal('modal-integration');
   }
 
+  /**
+   * Run End-to-End Test Integration (Requirement 10)
+   */
+  async function runTestIntegration() {
+    openModal('modal-test-integration');
+    testSummaryMessage.style.display = 'none';
+
+    testChecklistContainer.innerHTML = `
+      <div class="checklist-item">
+        <span class="check-icon">⏳</span>
+        <div class="check-info">
+          <strong>Running verification pipeline...</strong>
+          <p>Querying site credentials, domain authorization, SDK heartbeat, and queue status</p>
+        </div>
+      </div>
+    `;
+
+    try {
+      const res = await apiFetch(`${API_BASE}/sites/${currentSiteId}/test-integration`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Test integration API call failed');
+      }
+
+      const data = await res.json();
+      renderTestChecklist(data);
+
+      // Refresh site status in background
+      await refreshCurrentSiteStatus();
+    } catch (err) {
+      testChecklistContainer.innerHTML = `
+        <div class="checklist-item fail">
+          <span class="check-icon">❌</span>
+          <div class="check-info">
+            <strong>Verification Request Failed</strong>
+            <p>${escapeHtml(err.message)}</p>
+          </div>
+        </div>
+      `;
+      testSummaryMessage.className = 'test-summary-box error';
+      testSummaryMessage.innerHTML = `<strong>Verification Incomplete:</strong> ${escapeHtml(err.message)}`;
+      testSummaryMessage.style.display = 'block';
+    }
+  }
+
+  function renderTestChecklist(data) {
+    testChecklistContainer.innerHTML = '';
+    const checks = data.checks || [];
+
+    checks.forEach(check => {
+      const item = document.createElement('div');
+      let statusClass = check.passed ? 'pass' : (check.warning ? 'warning' : 'fail');
+      let icon = check.passed ? '✓' : (check.warning ? '⚠️' : '✗');
+
+      item.className = `checklist-item ${statusClass}`;
+      item.innerHTML = `
+        <span class="check-icon" style="font-weight:bold; font-size:1.1rem; color:${check.passed ? '#34d399' : (check.warning ? '#f59e0b' : '#ef4444')};">${icon}</span>
+        <div class="check-info">
+          <strong>${escapeHtml(check.title)}</strong>
+          <p>${escapeHtml(check.detail)}</p>
+        </div>
+      `;
+      testChecklistContainer.appendChild(item);
+    });
+
+    if (data.success && data.connected) {
+      testSummaryMessage.className = 'test-summary-box success';
+      testSummaryMessage.innerHTML = '<strong>🎉 Integration Verified:</strong> Chronicle SDK is actively communicating with this website. All scheduled cues will be delivered and removed automatically.';
+      testSummaryMessage.style.display = 'block';
+    } else {
+      testSummaryMessage.className = 'test-summary-box error';
+      testSummaryMessage.innerHTML = `
+        <strong>⚠️ Action Required:</strong>
+        ${!data.connected
+          ? 'The Chronicle SDK embed tag has not sent a heartbeat yet. Ensure the script tag is added to your target website, and load or reload the webpage.'
+          : 'One or more integration checks require attention before cues can be automatically delivered.'}
+      `;
+      testSummaryMessage.style.display = 'block';
+    }
+  }
+
+  /**
+   * Load Audit & Activity Logs (Requirement 12)
+   */
+  async function loadAuditLogs() {
+    try {
+      const res = await apiFetch(`${API_BASE}/audit-logs?limit=30`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const logs = data.logs || [];
+
+      if (logs.length === 0) {
+        auditFeedList.innerHTML = '<div class="audit-empty">No activity recorded yet. Create cues or register websites to populate the audit log.</div>';
+        return;
+      }
+
+      auditFeedList.innerHTML = '';
+      logs.forEach(log => {
+        const item = document.createElement('div');
+        item.className = 'audit-item';
+
+        const isSiteEvent = log.event_type.startsWith('site');
+        const badgeClass = isSiteEvent ? 'site' : 'cue';
+        const badgeText = log.event_type.replace('_', ' ');
+
+        item.innerHTML = `
+          <div class="audit-item-left">
+            <span class="audit-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+            <span class="audit-details">${escapeHtml(log.details)}</span>
+          </div>
+          <span class="audit-time">${formatRelativeTime(log.created_at)}</span>
+        `;
+        auditFeedList.appendChild(item);
+      });
+    } catch (e) {
+      console.warn('Failed to load audit logs:', e);
+    }
+  }
+
+  /**
+   * Register Site Handler
+   */
   async function handleSiteSubmit(e) {
     e.preventDefault();
     const name = document.getElementById('site-input-name').value.trim();
     const id = document.getElementById('site-input-id').value.trim();
     const domain = document.getElementById('site-input-domain').value.trim();
 
+    if (!name || !id) return;
+
     try {
-      await registerSite({ id, name, domain });
-      closeModal('modal-site');
-      currentSiteId = id;
-      await loadSites();
+      const site = await registerSite({ id, name, domain });
+      if (site) {
+        closeModal('modal-site');
+        document.getElementById('site-input-name').value = '';
+        document.getElementById('site-input-id').value = '';
+        await loadSites();
+        await loadAuditLogs();
+
+        // Automatically open the Integration Page for the new site!
+        currentSiteId = site.id;
+        siteSelect.value = site.id;
+        updateSiteDetails();
+        openWebsiteIntegrationModal();
+      }
     } catch (err) {
-      alert(`Failed to register site: ${err.message}`);
+      alert(`Failed to register website: ${err.message}`);
     }
+  }
+
+  async function registerSite(payload) {
+    const res = await apiFetch(`${API_BASE}/sites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to register site');
+    }
+    const data = await res.json();
+    return data.site;
   }
 
   /**
@@ -647,9 +1026,7 @@
   async function handleAuthSubmit(e) {
     e.preventDefault();
     authErrorMsg.style.display = 'none';
-
-    const key = authInputKey.value;
-    if (!key) return;
+    const key = authInputKey.value.trim();
 
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
@@ -659,33 +1036,26 @@
       });
 
       const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        authErrorMsg.textContent = data.message || 'Invalid admin credentials.';
-        authErrorMsg.style.display = 'block';
-        return;
+      if (!res.ok) {
+        throw new Error(data.message || 'Authentication failed');
       }
 
       if (data.token) {
         sessionStorage.setItem('chronicle_admin_token', data.token);
       }
-
-      authInputKey.value = '';
       isAuthenticated = true;
       updateAuthUI();
       closeModal('modal-auth');
+      authInputKey.value = '';
 
-      // Reload dashboard data
       await loadSites();
+      await loadAuditLogs();
     } catch (err) {
-      authErrorMsg.textContent = 'Authentication request failed: ' + err.message;
+      authErrorMsg.textContent = err.message;
       authErrorMsg.style.display = 'block';
     }
   }
 
-  /**
-   * Handle Logout
-   */
   async function handleLogout() {
     try {
       await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' });
@@ -693,7 +1063,8 @@
     sessionStorage.removeItem('chronicle_admin_token');
     isAuthenticated = false;
     updateAuthUI();
-    window.location.reload();
+    await checkAuthStatus();
+    await loadSites();
   }
 
   /**
@@ -752,6 +1123,31 @@
       });
     });
 
+    // View Website Integration Modal
+    btnViewIntegration.addEventListener('click', openWebsiteIntegrationModal);
+    document.getElementById('step-connect').addEventListener('click', openWebsiteIntegrationModal);
+
+    // Quick Test Integration
+    btnTestIntegrationQuick.addEventListener('click', runTestIntegration);
+    btnTestIntegrationFromModal.addEventListener('click', () => {
+      closeModal('modal-integration');
+      runTestIntegration();
+    });
+    btnRetestIntegration.addEventListener('click', runTestIntegration);
+
+    // Copy SDK Code from Integration Modal
+    btnCopyIntgCode.addEventListener('click', () => {
+      navigator.clipboard.writeText(intgEmbedCode.textContent).then(() => {
+        const orig = btnCopyIntgCode.textContent;
+        btnCopyIntgCode.textContent = 'Copied Code!';
+        btnCopyIntgCode.style.background = '#10b981';
+        setTimeout(() => {
+          btnCopyIntgCode.textContent = orig;
+          btnCopyIntgCode.style.background = '';
+        }, 2000);
+      });
+    });
+
     filterTabs.forEach(tab => {
       tab.addEventListener('click', () => {
         filterTabs.forEach(t => t.classList.remove('active'));
@@ -763,6 +1159,8 @@
 
     document.getElementById('btn-create-cue').addEventListener('click', openCreateCueModal);
     document.getElementById('btn-empty-create').addEventListener('click', openCreateCueModal);
+    document.getElementById('step-cue').addEventListener('click', openCreateCueModal);
+
     document.getElementById('btn-add-site').addEventListener('click', () => {
       if (authRequired && !isAuthenticated) {
         openModal('modal-auth');
@@ -770,13 +1168,19 @@
         openModal('modal-site');
       }
     });
-    document.getElementById('btn-refresh-cues').addEventListener('click', loadCues);
+
+    document.getElementById('btn-refresh-cues').addEventListener('click', async () => {
+      await refreshCurrentSiteStatus();
+      await loadCues();
+      await loadAuditLogs();
+    });
+
+    btnRefreshAudit.addEventListener('click', loadAuditLogs);
 
     if (btnBannerLogin) {
       btnBannerLogin.addEventListener('click', () => openModal('modal-auth'));
     }
 
-    // Auth action button
     if (btnAuthAction) {
       btnAuthAction.addEventListener('click', () => {
         if (isAuthenticated) {
@@ -804,19 +1208,15 @@
     cueHtmlInput.addEventListener('input', updateModalPreview);
     cueCssInput.addEventListener('input', updateModalPreview);
 
-    document.getElementById('preset-10s').addEventListener('click', () => {
-      setFormTimingPreset(10, 30);
+    // Quick demo presets
+    document.getElementById('preset-demo-1m').addEventListener('click', () => {
+      setFormTimingPreset(10, 60); // Starts in 10s, ends in 70s
+    });
+    document.getElementById('preset-demo-3m').addEventListener('click', () => {
+      setFormTimingPreset(60, 120); // Starts in 1m, ends in 3m
     });
     document.getElementById('preset-now-1h').addEventListener('click', () => {
-      setFormTimingPreset(0, 3600);
-    });
-    document.getElementById('preset-tomorrow').addEventListener('click', () => {
-      const now = getServerNow();
-      const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0);
-      const startMs = tomorrow.getTime();
-      const endMs = startMs + (5 * 24 * 3600 * 1000);
-      cueStartInput.value = isoToLocalDatetime(new Date(startMs).toISOString());
-      cueEndInput.value = isoToLocalDatetime(new Date(endMs).toISOString());
+      setFormTimingPreset(0, 3600); // Starts now, lasts 1h
     });
 
     formCue.addEventListener('submit', handleCueSubmit);

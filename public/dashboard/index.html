@@ -33,10 +33,10 @@
           <select id="site-select"></select>
         </div>
 
-        <button class="btn btn-secondary btn-sm" id="btn-add-site">+ New Site</button>
+        <button class="btn btn-secondary btn-sm" id="btn-add-site">+ New Website</button>
         <button class="btn btn-secondary btn-sm" id="btn-auth-action" style="display: none;">🔒 Login</button>
         <a href="/demo" target="_blank" class="btn btn-secondary btn-sm" id="link-demo-site" title="Open live demo site">
-          🏛️ Open Demo Site &rarr;
+          🏛️ Live Integration Demo &rarr;
         </a>
       </div>
     </div>
@@ -54,19 +54,93 @@
       <button type="button" class="btn btn-primary btn-sm" id="btn-banner-login">🔑 Enter Admin Key</button>
     </div>
 
-    <!-- Active Site & Embed Integration Overview -->
-    <section class="site-overview-card">
-      <div class="site-meta">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <h2 id="current-site-name">Apex Institute of Technology</h2>
-          <span id="current-site-id-badge" class="placement-tag">apex-university</span>
+    <!-- Product Workflow Banner -->
+    <div class="product-banner">
+      <div class="product-statement">
+        <strong>Chronicle</strong> enables website owners to integrate a lightweight SDK and centrally manage time-sensitive content that is automatically activated, displayed, and removed according to predefined schedules.
+      </div>
+      <div class="workflow-steps">
+        <div class="workflow-step" id="step-connect"><span class="step-num">1</span> Connect Website</div>
+        <span class="step-arrow">&rarr;</span>
+        <div class="workflow-step" id="step-cue"><span class="step-num">2</span> Create Cue</div>
+        <span class="step-arrow">&rarr;</span>
+        <div class="workflow-step" id="step-schedule"><span class="step-num">3</span> Schedule</div>
+        <span class="step-arrow">&rarr;</span>
+        <div class="workflow-step active" id="step-deliver"><span class="step-num">4</span> Auto-Deliver</div>
+      </div>
+    </div>
+
+    <!-- Dashboard Summary Metrics Cards -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-icon">🌐</div>
+        <div class="metric-info">
+          <span class="metric-label">Connected Websites</span>
+          <div class="metric-value-row">
+            <span class="metric-val" id="metric-connected-sites">0</span>
+            <span class="metric-sub" id="metric-total-sites">/ 0 total</span>
+          </div>
         </div>
-        <p id="current-site-domain">Target origin: http://localhost:3001</p>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">🟢</div>
+        <div class="metric-info">
+          <span class="metric-label">Active Cues</span>
+          <div class="metric-value-row">
+            <span class="metric-val" id="metric-active-cues">0</span>
+            <span class="metric-sub">delivering now</span>
+          </div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">⏱️</div>
+        <div class="metric-info">
+          <span class="metric-label">Scheduled Cues</span>
+          <div class="metric-value-row">
+            <span class="metric-val" id="metric-scheduled-cues">0</span>
+            <span class="metric-sub">upcoming</span>
+          </div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">📁</div>
+        <div class="metric-info">
+          <span class="metric-label">Expired Cues</span>
+          <div class="metric-value-row">
+            <span class="metric-val" id="metric-expired-cues">0</span>
+            <span class="metric-sub">auto-removed</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Active Site & Embed Integration Overview (Primary Feature) -->
+    <section class="site-overview-card">
+      <div class="site-header-row">
+        <div class="site-meta">
+          <div class="site-title-line">
+            <h2 id="current-site-name">Apex Institute of Technology</h2>
+            <span id="site-conn-status-badge" class="connection-pill status-disconnected">⚪ Not Connected</span>
+            <span id="current-site-id-badge" class="placement-tag">apex-university</span>
+          </div>
+          <div class="site-details-sub">
+            <span id="current-site-domain">Target origin: http://localhost:3001</span>
+            <span class="meta-separator">•</span>
+            <span id="current-site-key-display">Key: chr_live_...</span>
+            <span class="meta-separator">•</span>
+            <span id="current-site-heartbeat">Last Heartbeat: Never</span>
+          </div>
+        </div>
+
+        <div class="site-actions-row">
+          <button class="btn btn-secondary btn-sm" id="btn-view-integration">🔌 Website Integration Page</button>
+          <button class="btn btn-primary btn-sm" id="btn-test-integration-quick">🧪 Test Integration</button>
+        </div>
       </div>
 
       <div class="embed-code-wrapper">
-        <code id="embed-code-text">&lt;script src="http://localhost:3000/chronicle.js" data-site-key="apex-university"&gt;&lt;/script&gt;</code>
-        <button class="btn btn-secondary btn-sm" id="btn-copy-embed">Copy Snippet</button>
+        <code id="embed-code-text">&lt;script src="http://localhost:3000/chronicle.js" data-site-key="..."&gt;&lt;/script&gt;</code>
+        <button class="btn btn-secondary btn-sm" id="btn-copy-embed">📋 Copy SDK Code</button>
       </div>
     </section>
 
@@ -110,15 +184,29 @@
     <div class="empty-state" id="empty-state" style="display: none;">
       <div class="empty-icon">📭</div>
       <h3>No scheduled cues found</h3>
-      <p>Schedule banners, alerts, or in-page content to appear on cue.</p>
+      <p>Schedule banners, notices, or alerts to automatically appear and disappear on cue.</p>
       <button class="btn btn-primary" id="btn-empty-create">+ Schedule Your First Cue</button>
     </div>
+
+    <!-- Activity & Audit Logs Section -->
+    <section class="audit-section">
+      <div class="audit-header">
+        <div class="audit-title-area">
+          <h3>📋 Audit & Activity Log</h3>
+          <span class="audit-subtitle">Real-time audit trail of website registrations, SDK heartbeats, cue activations, and deletions</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-refresh-audit">🔄 Refresh Log</button>
+      </div>
+      <div class="audit-feed" id="audit-feed-list">
+        <div class="audit-empty">No activity recorded yet.</div>
+      </div>
+    </section>
 
   </main>
 
   <!-- ================= MODAL: CREATE / EDIT CUE ================= -->
   <div class="modal-overlay" id="modal-cue">
-    <div class="modal-box">
+    <div class="modal-box" style="max-width: 680px;">
       <div class="modal-header">
         <h3 id="modal-cue-title">Schedule Timed Content</h3>
         <button class="modal-close" data-close-modal="modal-cue">&times;</button>
@@ -127,75 +215,99 @@
         <div class="modal-body">
           <input type="hidden" id="cue-id">
 
-          <!-- Title -->
-          <div class="form-group">
-            <label for="cue-input-title">Cue Title / Campaign Name</label>
-            <input type="text" id="cue-input-title" class="form-control" placeholder="e.g. Flash Midterm Announcement" required>
+          <!-- Explicit Cue Flow Indicator -->
+          <div class="cue-flow-breadcrumbs">
+            <span class="flow-pill active">1. Target Website</span>
+            <span class="flow-arrow">&rarr;</span>
+            <span class="flow-pill active">2. Target Element</span>
+            <span class="flow-arrow">&rarr;</span>
+            <span class="flow-pill active">3. Content</span>
+            <span class="flow-arrow">&rarr;</span>
+            <span class="flow-pill active">4. Action</span>
+            <span class="flow-arrow">&rarr;</span>
+            <span class="flow-pill active">5. Timing</span>
           </div>
 
-          <!-- Placement Row -->
+          <!-- Step 1: Target Website -->
+          <div class="form-group">
+            <label for="cue-target-site-display">Target Website</label>
+            <div id="cue-target-site-display" class="target-site-box">
+              <span class="target-site-name" id="modal-target-site-name">Apex Institute of Technology</span>
+              <span class="target-site-id" id="modal-target-site-id">(apex-university)</span>
+            </div>
+          </div>
+
+          <!-- Cue Title / Name -->
+          <div class="form-group">
+            <label for="cue-input-title">Cue Title / Campaign Name</label>
+            <input type="text" id="cue-input-title" class="form-control" placeholder="e.g. Notice Board: Limited Time Offer – 30% OFF" required>
+          </div>
+
+          <!-- Step 2: Target Element & Placement -->
           <div class="form-row">
             <div class="form-group">
-              <label for="cue-input-placement">Placement Type</label>
+              <label for="cue-input-placement">Target Element Placement</label>
               <select id="cue-input-placement" class="form-control">
-                <option value="top_banner">Top Announcement Banner</option>
-                <option value="selector">CSS Element Target (In-Page)</option>
+                <option value="selector">CSS Target Element (e.g. #notice-board)</option>
+                <option value="top_banner">Top Announcement Banner (Sticky Page Header)</option>
               </select>
             </div>
 
-            <div class="form-group" id="selector-group" style="display: none;">
+            <div class="form-group" id="selector-group">
               <label for="cue-input-selector">Target CSS Selector</label>
-              <input type="text" id="cue-input-selector" class="form-control" placeholder="e.g. #notice-board, .hero-slot" value="#notice-board">
+              <input type="text" id="cue-input-selector" class="form-control" placeholder="e.g. #notice-board, .announcements" value="#notice-board" required>
+              <small style="color:#64748b; font-size:0.75rem;">Must be a valid CSS selector matching an element on the target website.</small>
             </div>
           </div>
 
-          <!-- Action (if selector) -->
-          <div class="form-group" id="action-group" style="display: none;">
+          <!-- Step 4: Action (if selector) -->
+          <div class="form-group" id="action-group">
             <label for="cue-input-action">Injection Action</label>
             <select id="cue-input-action" class="form-control">
               <option value="prepend">Prepend (Insert as first item inside target)</option>
-              <option value="append">Append (Insert as last item inside target)</option>
+              <option value="append" selected>Append (Insert as last item inside target)</option>
               <option value="replace">Replace (Temporarily replace target content, restores on expiry)</option>
             </select>
           </div>
 
-          <!-- Message HTML -->
+          <!-- Step 3: Content (HTML or Text) -->
           <div class="form-group">
-            <label for="cue-input-html">Content (HTML or Text)</label>
-            <textarea id="cue-input-html" class="form-control" rows="4" placeholder="Type announcement or HTML..." required></textarea>
+            <label for="cue-input-html">Content (HTML or Text — Sanitized for Security)</label>
+            <textarea id="cue-input-html" class="form-control" rows="4" placeholder="e.g. <div class='notice-item'><h3>Limited Time Offer</h3><p>Get 30% OFF all courses this week!</p></div>" required></textarea>
+            <small style="color:#64748b; font-size:0.75rem;">Safe HTML formatting supported. Malicious scripts, iframe exploits, and dangerous handlers are automatically filtered.</small>
           </div>
 
           <!-- Custom CSS (Optional) -->
           <div class="form-group">
             <label for="cue-input-css">Custom CSS Styles (Optional)</label>
-            <textarea id="cue-input-css" class="form-control" rows="2" placeholder="e.g. .chronicle-top-banner { background: #b91c1c !important; }"></textarea>
+            <textarea id="cue-input-css" class="form-control" rows="2" placeholder="e.g. #notice-board .notice-card { background: #1e3a8a; color: white; padding: 14px; border-radius: 8px; }"></textarea>
           </div>
 
-          <!-- Timing Controls -->
+          <!-- Step 5: Timing Controls -->
           <div class="form-row">
             <div class="form-group">
               <label for="cue-input-start">Start Time</label>
               <input type="datetime-local" id="cue-input-start" class="form-control" required>
             </div>
             <div class="form-group">
-              <label for="cue-input-end">Expiry Time</label>
+              <label for="cue-input-end">End Time (Expiry)</label>
               <input type="datetime-local" id="cue-input-end" class="form-control" required>
             </div>
           </div>
 
           <!-- Quick Timing Presets -->
           <div class="form-group">
-            <span style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Quick Schedule Presets:</span>
+            <span style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase; font-weight: 600;">⚡ Quick Demo Presets:</span>
             <div class="quick-presets">
-              <button type="button" class="preset-chip" id="preset-10s">⚡ Starts in 10s (lasts 30s) — Instant Test</button>
-              <button type="button" class="preset-chip" id="preset-now-1h">⏱️ Starts Now (lasts 1 hour)</button>
-              <button type="button" class="preset-chip" id="preset-tomorrow">📅 Tomorrow at 9 AM (lasts 5 days)</button>
+              <button type="button" class="preset-chip" id="preset-demo-1m">🚀 1-Min Live Demo: Starts in 10s, ends in 70s</button>
+              <button type="button" class="preset-chip" id="preset-demo-3m">⏱️ 3-Min Demo: Starts in 1m, ends in 3m</button>
+              <button type="button" class="preset-chip" id="preset-now-1h">🕒 Starts Now (lasts 1 hour)</button>
             </div>
           </div>
 
           <!-- Live Preview Frame in Modal -->
           <div class="form-group">
-            <label>Live Preview</label>
+            <label>Live Content Preview</label>
             <div class="preview-container" id="modal-preview-box">
               <em style="color:#64748b; font-size:0.85rem;">Type content above to see live preview...</em>
             </div>
@@ -210,6 +322,104 @@
     </div>
   </div>
 
+  <!-- ================= MODAL: WEBSITE INTEGRATION PAGE (Requirements 1 & 2) ================= -->
+  <div class="modal-overlay" id="modal-integration">
+    <div class="modal-box" style="max-width: 640px;">
+      <div class="modal-header">
+        <h3>🔌 Website Integration & SDK Setup</h3>
+        <button class="modal-close" data-close-modal="modal-integration">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="integration-site-card">
+          <div class="integration-header-row">
+            <div>
+              <h4 id="intg-site-name" style="font-size:1.15rem; color:#fff;">Apex Institute of Technology</h4>
+              <span id="intg-site-domain" style="font-size:0.85rem; color:#94a3b8;">http://localhost:3001</span>
+            </div>
+            <div id="intg-status-badge" class="connection-pill status-disconnected">⚪ Not Connected</div>
+          </div>
+
+          <div class="intg-grid">
+            <div class="intg-grid-item">
+              <span class="intg-label">Site ID</span>
+              <strong id="intg-site-id" class="intg-val">apex-university</strong>
+            </div>
+            <div class="intg-grid-item">
+              <span class="intg-label">Site Key</span>
+              <strong id="intg-site-key" class="intg-val">chr_live_...</strong>
+            </div>
+            <div class="intg-grid-item">
+              <span class="intg-label">SDK Version</span>
+              <strong id="intg-sdk-version" class="intg-val">v1.1.0</strong>
+            </div>
+            <div class="intg-grid-item">
+              <span class="intg-label">Last Connection / Heartbeat</span>
+              <strong id="intg-last-seen" class="intg-val">Never</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 18px;">
+          <label style="display:flex; justify-content:space-between; align-items:center;">
+            <span>SDK Integration Embed Code</span>
+            <span style="font-size:0.75rem; color:#94a3b8;">Add to your website's &lt;head&gt; or before &lt;/body&gt;</span>
+          </label>
+          <div class="embed-code-wrapper">
+            <code id="intg-embed-code">&lt;script src="https://.../chronicle.js" data-site-key="..."&gt;&lt;/script&gt;</code>
+            <button class="btn btn-secondary btn-sm" id="btn-copy-intg-code">📋 Copy Code</button>
+          </div>
+        </div>
+
+        <div class="integration-guide">
+          <h5>📖 Simple Setup Instructions</h5>
+          <ol class="setup-steps-list">
+            <li><strong>Copy the snippet:</strong> Click "Copy Code" above to copy your website's unique Chronicle embed tag.</li>
+            <li><strong>Embed in your website:</strong> Paste the script into your target website HTML (inside <code>&lt;head&gt;</code> or just before <code>&lt;/body&gt;</code>).</li>
+            <li><strong>Reload your website:</strong> Load your target webpage in any browser. The SDK will automatically contact Chronicle and register a live heartbeat.</li>
+            <li><strong>Verify Connection:</strong> Click the "Test Integration" button below to verify that Chronicle is communicating with your website.</li>
+          </ol>
+        </div>
+
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button type="button" class="btn btn-secondary" data-close-modal="modal-integration">Close</button>
+        <button type="button" class="btn btn-primary" id="btn-test-integration-from-modal">🧪 Test Integration Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: END-TO-END TEST INTEGRATION (Requirement 10) ================= -->
+  <div class="modal-overlay" id="modal-test-integration">
+    <div class="modal-box" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3>🧪 End-to-End Integration Verification</h3>
+        <button class="modal-close" data-close-modal="modal-test-integration">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:0.85rem; color:#94a3b8; margin-bottom:16px;">
+          Verifying live SDK communication, website credentials, and automated delivery pipeline:
+        </p>
+
+        <div class="test-checklist" id="test-checklist-container">
+          <!-- Dynamic check items -->
+          <div class="checklist-item">
+            <span class="check-icon">⏳</span>
+            <div class="check-info">
+              <strong>Running system verification...</strong>
+              <p>Contacting Chronicle Engine delivery pipeline</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="test-summary-message" class="test-summary-box" style="display:none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-modal="modal-test-integration">Close</button>
+        <button type="button" class="btn btn-primary" id="btn-retest-integration">🔄 Re-Test</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ================= MODAL: REGISTER SITE ================= -->
   <div class="modal-overlay" id="modal-site">
     <div class="modal-box" style="max-width: 480px;">
@@ -221,21 +431,22 @@
         <div class="modal-body">
           <div class="form-group">
             <label for="site-input-name">Website Name</label>
-            <input type="text" id="site-input-name" class="form-control" placeholder="e.g. Apex Institute, Aura Store" required>
+            <input type="text" id="site-input-name" class="form-control" placeholder="e.g. Apex Institute, Demo Store" required>
           </div>
           <div class="form-group">
-            <label for="site-input-id">Site Key / Identifier</label>
-            <input type="text" id="site-input-id" class="form-control" placeholder="e.g. apex-university, aura-store" required>
-            <small style="color:#64748b; font-size:0.75rem;">Used in data-site-key for the embed script.</small>
+            <label for="site-input-id">Website Identifier (Slug)</label>
+            <input type="text" id="site-input-id" class="form-control" placeholder="e.g. apex-university, demo-site" required>
+            <small style="color:#64748b; font-size:0.75rem;">Chronicle will also generate a secure unique Site Key automatically.</small>
           </div>
           <div class="form-group">
-            <label for="site-input-domain">Target Domain / URL</label>
-            <input type="text" id="site-input-domain" class="form-control" placeholder="e.g. http://localhost:3001" value="http://localhost:3001">
+            <label for="site-input-domain">Target Domain / URL (Optional in Dev)</label>
+            <input type="text" id="site-input-domain" class="form-control" placeholder="e.g. http://localhost:3001 or https://example.com" value="http://localhost:3001">
+            <small style="color:#64748b; font-size:0.75rem;">Locks content delivery to this origin in production to prevent unauthorized usage.</small>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-close-modal="modal-site">Cancel</button>
-          <button type="submit" class="btn btn-primary">Register Site</button>
+          <button type="submit" class="btn btn-primary">Register Website</button>
         </div>
       </form>
     </div>

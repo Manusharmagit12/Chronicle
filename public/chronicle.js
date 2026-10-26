@@ -65,7 +65,7 @@
    */
   async function fetchCues() {
     try {
-      const url = `${state.apiUrl}/api/v1/cues?siteKey=${encodeURIComponent(state.siteKey)}&path=${encodeURIComponent(window.location.pathname)}`;
+      const url = `${state.apiUrl}/api/v1/cues?siteKey=${encodeURIComponent(state.siteKey)}&sdkVersion=1.1.0&path=${encodeURIComponent(window.location.pathname)}`;
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -467,8 +467,21 @@
 
   // Public runtime API
   window.Chronicle = {
-    version: '1.0.0',
+    version: '1.1.0',
     refresh: fetchCues,
+    heartbeat: async () => {
+      try {
+        const res = await fetch(`${state.apiUrl}/api/v1/heartbeat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteKey: state.siteKey, sdkVersion: '1.1.0' })
+        });
+        return await res.json();
+      } catch (err) {
+        console.warn('[Chronicle] Heartbeat failed:', err.message);
+        return null;
+      }
+    },
     getActiveCues: () => Array.from(state.renderedCues.values()).map(r => r.cue),
     getAllCues: () => [...state.cues],
     getServerTime: () => new Date(getCurrentServerMs()).toISOString()

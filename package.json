@@ -15,7 +15,8 @@
     "test:dashboard": "node test/dashboard-workflow.test.js",
     "test:production": "node test/production-ready.test.js",
     "test:postgres": "node test/postgres-persistence.test.js",
-    "test": "node test/engine-verify.js && node test/dashboard-workflow.test.js && node test/production-ready.test.js && node test/auth-unit.test.js && node test/postgres-persistence.test.js"
+    "test:integration": "node test/integration-verification.test.js",
+    "test": "node test/engine-verify.js && node test/dashboard-workflow.test.js && node test/production-ready.test.js && node test/auth-unit.test.js && node test/postgres-persistence.test.js && node test/integration-verification.test.js"
   },
   "keywords": [],
   "author": "",

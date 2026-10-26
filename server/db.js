@@ -1,7 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import pg from 'pg';
+import { sanitizeHtml, sanitizeCss } from './sanitizer.js';
 
 const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,6 +107,9 @@ const COMMON_SCHEMA = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     domain TEXT,
+    site_key TEXT,
+    last_seen_at TEXT,
+    sdk_version TEXT,
     created_at TEXT NOT NULL
   );
 
@@ -123,8 +128,17 @@ const COMMON_SCHEMA = `
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY,
+    site_id TEXT,
+    event_type TEXT NOT NULL,
+    details TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_cues_site ON cues(site_id);
   CREATE INDEX IF NOT EXISTS idx_cues_timing ON cues(site_id, is_active, start_at, end_at);
+  CREATE INDEX IF NOT EXISTS idx_audit_logs_site ON audit_logs(site_id, created_at);
 `;
 
 /**
@@ -134,9 +148,25 @@ export async function initDb() {
   if (isPostgresDatabase()) {
     const pool = getPgPool();
     await pool.query(COMMON_SCHEMA);
+    try {
+      await pool.query(`
+        ALTER TABLE sites ADD COLUMN IF NOT EXISTS site_key TEXT;
+        ALTER TABLE sites ADD COLUMN IF NOT EXISTS last_seen_at TEXT;
+        ALTER TABLE sites ADD COLUMN IF NOT EXISTS sdk_version TEXT;
+      `);
+    } catch (e) {
+      // In case in-memory DB or emulator doesn't support ALTER
+    }
   } else {
     const db = await getSqliteDb();
     db.exec(COMMON_SCHEMA);
+    try {
+      const tableInfo = db.prepare("PRAGMA table_info(sites)").all();
+      const colNames = new Set(tableInfo.map(c => c.name));
+      if (!colNames.has('site_key')) db.exec("ALTER TABLE sites ADD COLUMN site_key TEXT");
+      if (!colNames.has('last_seen_at')) db.exec("ALTER TABLE sites ADD COLUMN last_seen_at TEXT");
+      if (!colNames.has('sdk_version')) db.exec("ALTER TABLE sites ADD COLUMN sdk_version TEXT");
+    } catch (e) {}
   }
 
   // Ensure default demo site exists if no sites are registered yet
@@ -147,7 +177,8 @@ export async function initDb() {
       await upsertSite({
         id: 'apex-university',
         name: 'Apex Institute of Technology',
-        domain: '' // allows delivery to any origin by default
+        domain: '', // allows delivery to any origin by default
+        site_key: 'chr_live_apex_univ_demo'
       });
 
       await createCue({
@@ -192,6 +223,12 @@ export async function initDb() {
         start_at: new Date(now - 5 * 60 * 1000).toISOString(),
         end_at: new Date(now + 24 * 60 * 60 * 1000).toISOString()
       });
+
+      await logAuditEvent({
+        site_id: 'apex-university',
+        event_type: 'site_registered',
+        details: 'Initial demonstration website and default sample cues provisioned.'
+      });
     }
   } catch (seedErr) {
     console.warn('[Chronicle DB] Notice: Seed check skipped or failed:', seedErr.message);
@@ -202,40 +239,70 @@ export async function initDb() {
    SITE OPERATIONS
 ======================================================================= */
 
-export async function getSite(siteId) {
+export async function getSite(siteKey) {
+  if (!siteKey) return null;
   if (isPostgresDatabase()) {
     const pool = getPgPool();
-    const res = await pool.query('SELECT * FROM sites WHERE id = $1', [siteId]);
+    const res = await pool.query(
+      'SELECT * FROM sites WHERE id = $1 OR site_key = $1 LIMIT 1',
+      [siteKey]
+    );
     return res.rows[0] || null;
   } else {
     const db = await getSqliteDb();
-    const stmt = db.prepare('SELECT * FROM sites WHERE id = ?');
-    return stmt.get(siteId) || null;
+    const stmt = db.prepare('SELECT * FROM sites WHERE id = ? OR site_key = ? LIMIT 1');
+    return stmt.get(siteKey, siteKey) || null;
   }
 }
 
-export async function upsertSite({ id, name, domain }) {
+export async function upsertSite({ id, name, domain, site_key }) {
   const now = new Date().toISOString();
+  const key = site_key || 'chr_live_' + crypto.randomBytes(8).toString('hex');
   if (isPostgresDatabase()) {
     const pool = getPgPool();
     const res = await pool.query(`
-      INSERT INTO sites (id, name, domain, created_at)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (id) DO UPDATE SET name = $2, domain = $3
+      INSERT INTO sites (id, name, domain, site_key, created_at)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (id) DO UPDATE SET
+        name = $2,
+        domain = $3,
+        site_key = COALESCE(sites.site_key, $4)
       RETURNING *
-    `, [id, name, domain || '', now]);
+    `, [id, name, domain || '', key, now]);
     return res.rows[0];
   } else {
     const db = await getSqliteDb();
     const existing = await getSite(id);
     if (existing) {
-      const stmt = db.prepare('UPDATE sites SET name = ?, domain = ? WHERE id = ?');
-      stmt.run(name, domain || '', id);
+      const stmt = db.prepare('UPDATE sites SET name = ?, domain = ?, site_key = COALESCE(site_key, ?) WHERE id = ?');
+      stmt.run(name, domain || '', key, id);
     } else {
-      const stmt = db.prepare('INSERT INTO sites (id, name, domain, created_at) VALUES (?, ?, ?, ?)');
-      stmt.run(id, name, domain || '', now);
+      const stmt = db.prepare('INSERT INTO sites (id, name, domain, site_key, created_at) VALUES (?, ?, ?, ?, ?)');
+      stmt.run(id, name, domain || '', key, now);
     }
     return getSite(id);
+  }
+}
+
+export async function touchSiteHeartbeat(siteKey, sdkVersion = null) {
+  const now = new Date().toISOString();
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    await pool.query(`
+      UPDATE sites SET
+        last_seen_at = $1,
+        sdk_version = COALESCE($2, sdk_version)
+      WHERE id = $3 OR site_key = $3
+    `, [now, sdkVersion, siteKey]);
+  } else {
+    const db = await getSqliteDb();
+    const stmt = db.prepare(`
+      UPDATE sites SET
+        last_seen_at = ?,
+        sdk_version = COALESCE(?, sdk_version)
+      WHERE id = ? OR site_key = ?
+    `);
+    stmt.run(now, sdkVersion, siteKey, siteKey);
   }
 }
 
@@ -265,7 +332,7 @@ export async function deleteSite(siteId) {
 }
 
 /* =======================================================================
-   CUE OPERATIONS
+   CUE OPERATIONS (Strictly Isolated by Site ID + Sanitized)
 ======================================================================= */
 
 export async function createCue({
@@ -281,8 +348,27 @@ export async function createCue({
   end_at,
   is_active = 1
 }) {
+  const site = await getSite(site_id);
+  if (!site) {
+    throw new Error(`Cannot schedule cue: Target website '${site_id}' is not registered.`);
+  }
+
+  const resolvedSiteId = site.id;
   const cueId = id || 'cue_' + Math.random().toString(36).substring(2, 10);
   const now = new Date().toISOString();
+
+  // Validate timing logic
+  if (new Date(end_at).getTime() <= new Date(start_at).getTime()) {
+    throw new Error('Cue expiry time must be strictly after the scheduled start time.');
+  }
+
+  // Security: Sanitize HTML markup and CSS before persistence
+  const safeHtml = sanitizeHtml(content_html);
+  const safeCss = sanitizeCss(css_styles);
+
+  if (!safeHtml || safeHtml.trim().length === 0) {
+    throw new Error('Cue content contains invalid or prohibited elements.');
+  }
 
   if (isPostgresDatabase()) {
     const pool = getPgPool();
@@ -294,13 +380,13 @@ export async function createCue({
       RETURNING *
     `, [
       cueId,
-      site_id,
+      resolvedSiteId,
       title,
       placement_type,
-      target_selector,
+      target_selector || '',
       action,
-      content_html,
-      css_styles,
+      safeHtml,
+      safeCss,
       start_at,
       end_at,
       is_active ? 1 : 0,
@@ -317,13 +403,13 @@ export async function createCue({
     `);
     stmt.run(
       cueId,
-      site_id,
+      resolvedSiteId,
       title,
       placement_type,
-      target_selector,
+      target_selector || '',
       action,
-      content_html,
-      css_styles,
+      safeHtml,
+      safeCss,
       start_at,
       end_at,
       is_active ? 1 : 0,
@@ -366,11 +452,22 @@ export async function updateCue(id, updates) {
   const placement_type = updates.placement_type !== undefined ? updates.placement_type : existing.placement_type;
   const target_selector = updates.target_selector !== undefined ? updates.target_selector : existing.target_selector;
   const action = updates.action !== undefined ? updates.action : existing.action;
-  const content_html = updates.content_html !== undefined ? updates.content_html : existing.content_html;
-  const css_styles = updates.css_styles !== undefined ? updates.css_styles : existing.css_styles;
+
+  const content_html = updates.content_html !== undefined
+    ? sanitizeHtml(updates.content_html)
+    : existing.content_html;
+
+  const css_styles = updates.css_styles !== undefined
+    ? sanitizeCss(updates.css_styles)
+    : existing.css_styles;
+
   const start_at = updates.start_at !== undefined ? updates.start_at : existing.start_at;
   const end_at = updates.end_at !== undefined ? updates.end_at : existing.end_at;
   const is_active = updates.is_active !== undefined ? (updates.is_active ? 1 : 0) : existing.is_active;
+
+  if (new Date(end_at).getTime() <= new Date(start_at).getTime()) {
+    throw new Error('Cue expiry time must be strictly after the scheduled start time.');
+  }
 
   if (isPostgresDatabase()) {
     const pool = getPgPool();
@@ -426,7 +523,14 @@ export async function toggleCueActive(id, forcedState = null) {
   }
 }
 
-export async function listCuesForSite(siteId) {
+/**
+ * List all cues for a given site ID or site key (Strictly isolated by site)
+ */
+export async function listCuesForSite(siteKey) {
+  const site = await getSite(siteKey);
+  if (!site) return [];
+  const siteId = site.id;
+
   if (isPostgresDatabase()) {
     const pool = getPgPool();
     const res = await pool.query('SELECT * FROM cues WHERE site_id = $1 ORDER BY start_at ASC', [siteId]);
@@ -440,9 +544,13 @@ export async function listCuesForSite(siteId) {
 
 /**
  * Returns currently active cues and upcoming cues (within lookaheadMs)
- * with server-side time validation.
+ * with server-side time validation. Strictly isolated to the target site.
  */
-export async function getCuesForDelivery(siteId, lookaheadMs = 24 * 60 * 60 * 1000) {
+export async function getCuesForDelivery(siteKey, lookaheadMs = 24 * 60 * 60 * 1000) {
+  const site = await getSite(siteKey);
+  if (!site) return [];
+  const siteId = site.id;
+
   const now = new Date();
   const nowIso = now.toISOString();
   const lookaheadIso = new Date(now.getTime() + lookaheadMs).toISOString();
@@ -483,4 +591,67 @@ export async function getCuesForDelivery(siteId, lookaheadMs = 24 * 60 * 60 * 10
       remainingMsToEnd: Math.max(0, new Date(cue.end_at).getTime() - now.getTime())
     };
   });
+}
+
+/* =======================================================================
+   AUDIT LOG OPERATIONS
+======================================================================= */
+
+export async function logAuditEvent({ site_id, event_type, details }) {
+  const id = 'evt_' + Math.random().toString(36).substring(2, 10);
+  const now = new Date().toISOString();
+  const detailsStr = typeof details === 'string' ? details : JSON.stringify(details);
+
+  try {
+    if (isPostgresDatabase()) {
+      const pool = getPgPool();
+      await pool.query(`
+        INSERT INTO audit_logs (id, site_id, event_type, details, created_at)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [id, site_id || null, event_type, detailsStr, now]);
+    } else {
+      const db = await getSqliteDb();
+      const stmt = db.prepare(`
+        INSERT INTO audit_logs (id, site_id, event_type, details, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      stmt.run(id, site_id || null, event_type, detailsStr, now);
+    }
+  } catch (err) {
+    console.warn('[Chronicle DB] Notice: Audit log write skipped:', err.message);
+  }
+
+  return { id, site_id, event_type, details: detailsStr, created_at: now };
+}
+
+export async function listAuditLogs(siteId = null, limit = 50) {
+  if (isPostgresDatabase()) {
+    const pool = getPgPool();
+    if (siteId) {
+      const res = await pool.query(
+        'SELECT * FROM audit_logs WHERE site_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [siteId, limit]
+      );
+      return res.rows;
+    } else {
+      const res = await pool.query(
+        'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT $1',
+        [limit]
+      );
+      return res.rows;
+    }
+  } else {
+    const db = await getSqliteDb();
+    if (siteId) {
+      const stmt = db.prepare(
+        'SELECT * FROM audit_logs WHERE site_id = ? ORDER BY created_at DESC LIMIT ?'
+      );
+      return stmt.all(siteId, limit);
+    } else {
+      const stmt = db.prepare(
+        'SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ?'
+      );
+      return stmt.all(limit);
+    }
+  }
 }

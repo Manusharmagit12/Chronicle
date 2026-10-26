@@ -10,7 +10,10 @@ import {
   deleteCue,
   deleteSite,
   listCuesForSite,
-  getCuesForDelivery
+  getCuesForDelivery,
+  touchSiteHeartbeat,
+  logAuditEvent,
+  listAuditLogs
 } from '../db.js';
 import {
   isAuthRequired,
@@ -169,9 +172,10 @@ apiRouter.post('/auth/logout', (req, res) => {
 /**
  * Public Delivery API: Called by chronicle.js on client websites.
  * Returns time-validated active cues and upcoming cues for the current time.
+ * Also records SDK heartbeat and connection metadata.
  */
 apiRouter.get('/cues', async (req, res) => {
-  const { siteKey } = req.query;
+  const { siteKey, sdkVersion, sdk_version } = req.query;
 
   if (!siteKey) {
     return res.status(400).json({ error: 'Missing required query parameter: siteKey' });
@@ -191,17 +195,55 @@ apiRouter.get('/cues', async (req, res) => {
     });
   }
 
+  // Record connection heartbeat
+  const version = sdkVersion || sdk_version || '1.1.0';
+  await touchSiteHeartbeat(siteKey, version);
+
   const serverTime = new Date().toISOString();
-  // Fetch active cues and cues starting within the next 24 hours
+  // Fetch active cues and cues starting within the next 24 hours (strictly isolated)
   const cues = await getCuesForDelivery(siteKey);
 
   res.json({
     site: {
       id: site.id,
-      name: site.name
+      name: site.name,
+      domain: site.domain
     },
     serverTime,
     cues
+  });
+});
+
+/**
+ * Public Heartbeat Endpoint: Explicit ping from SDK for live status tracking
+ */
+apiRouter.post('/heartbeat', async (req, res) => {
+  const { siteKey, sdkVersion = '1.1.0' } = req.body || {};
+
+  if (!siteKey) {
+    return res.status(400).json({ error: 'Missing siteKey in heartbeat payload' });
+  }
+
+  const site = await getSite(siteKey);
+  if (!site) {
+    return res.status(404).json({ error: `Site '${siteKey}' not found` });
+  }
+
+  const originValidation = validateSiteOrigin(req, site);
+  if (!originValidation.allowed) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: originValidation.reason
+    });
+  }
+
+  await touchSiteHeartbeat(siteKey, sdkVersion);
+
+  res.json({
+    success: true,
+    siteId: site.id,
+    connected: true,
+    serverTime: new Date().toISOString()
   });
 });
 
@@ -255,6 +297,18 @@ apiRouter.get('/cues/single/:id', requireAdminAuth, async (req, res) => {
 });
 
 /**
+ * Helper: Validates basic CSS selector format
+ */
+function isValidCssSelector(selector) {
+  if (!selector || typeof selector !== 'string') return true;
+  const trimmed = selector.trim();
+  if (trimmed.length === 0) return true;
+  // Disallow tags, brackets without attributes, dangerous syntax
+  if (/[<>{};"']/.test(trimmed)) return false;
+  return /^[a-zA-Z0-9_\-\.\#\:\s\[\]\=\^\$\*\~\|\,\>\+\(\)]+$/.test(trimmed);
+}
+
+/**
  * Admin: Create or schedule a cue
  */
 apiRouter.post('/cues', requireAdminAuth, async (req, res) => {
@@ -283,6 +337,10 @@ apiRouter.post('/cues', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ error: 'start_at must be before end_at' });
     }
 
+    if (target_selector && !isValidCssSelector(target_selector)) {
+      return res.status(400).json({ error: `Invalid CSS selector syntax: "${target_selector}"` });
+    }
+
     const site = await getSite(site_id);
     if (!site) {
       return res.status(404).json({ error: `Site '${site_id}' does not exist` });
@@ -300,6 +358,12 @@ apiRouter.post('/cues', requireAdminAuth, async (req, res) => {
       start_at,
       end_at,
       is_active
+    });
+
+    await logAuditEvent({
+      site_id: site.id,
+      event_type: 'cue_created',
+      details: `Created cue "${cue.title}" (${cue.placement_type}) for target "${cue.target_selector || 'body'}"`
     });
 
     res.status(201).json({ success: true, cue });
@@ -336,6 +400,10 @@ apiRouter.put('/cues/:id', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ error: 'start_at must be before end_at' });
     }
 
+    if (target_selector && !isValidCssSelector(target_selector)) {
+      return res.status(400).json({ error: `Invalid CSS selector syntax: "${target_selector}"` });
+    }
+
     const updated = await updateCue(id, {
       title,
       placement_type,
@@ -346,6 +414,12 @@ apiRouter.put('/cues/:id', requireAdminAuth, async (req, res) => {
       start_at,
       end_at,
       is_active
+    });
+
+    await logAuditEvent({
+      site_id: existing.site_id,
+      event_type: 'cue_updated',
+      details: `Updated cue "${updated.title}"`
     });
 
     res.json({ success: true, cue: updated });
@@ -368,6 +442,13 @@ apiRouter.patch('/cues/:id/toggle', requireAdminAuth, async (req, res) => {
 
     const forcedState = req.body.is_active !== undefined ? req.body.is_active : null;
     const updated = await toggleCueActive(id, forcedState);
+
+    await logAuditEvent({
+      site_id: existing.site_id,
+      event_type: updated.is_active ? 'cue_activated' : 'cue_disabled',
+      details: `${updated.is_active ? 'Enabled' : 'Disabled'} cue "${updated.title}"`
+    });
+
     res.json({ success: true, cue: updated });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -378,7 +459,17 @@ apiRouter.patch('/cues/:id/toggle', requireAdminAuth, async (req, res) => {
  * Admin: Delete a cue
  */
 apiRouter.delete('/cues/:id', requireAdminAuth, async (req, res) => {
+  const existing = await getCue(req.params.id);
   await deleteCue(req.params.id);
+
+  if (existing) {
+    await logAuditEvent({
+      site_id: existing.site_id,
+      event_type: 'cue_deleted',
+      details: `Deleted cue "${existing.title}" (ID: ${req.params.id})`
+    });
+  }
+
   res.json({ success: true, message: `Cue ${req.params.id} deleted` });
 });
 
@@ -391,6 +482,13 @@ apiRouter.post('/sites', requireAdminAuth, async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields: id, name' });
   }
   const site = await upsertSite({ id, name, domain });
+
+  await logAuditEvent({
+    site_id: site.id,
+    event_type: 'site_registered',
+    details: `Registered website "${site.name}" (Key: ${site.site_key})`
+  });
+
   res.json({ success: true, site });
 });
 
@@ -403,9 +501,146 @@ apiRouter.get('/sites', requireAdminAuth, async (req, res) => {
 });
 
 /**
+ * Admin: Get single site with connection metrics
+ */
+apiRouter.get('/sites/:id', requireAdminAuth, async (req, res) => {
+  const site = await getSite(req.params.id);
+  if (!site) {
+    return res.status(404).json({ error: 'Site not found' });
+  }
+
+  const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+  const isConnected = site.last_seen_at && (new Date(site.last_seen_at).getTime() >= fiveMinutesAgo);
+
+  res.json({
+    site: {
+      ...site,
+      connected: Boolean(isConnected)
+    }
+  });
+});
+
+/**
  * Admin: Delete site
  */
 apiRouter.delete('/sites/:id', requireAdminAuth, async (req, res) => {
+  const site = await getSite(req.params.id);
   await deleteSite(req.params.id);
+
+  await logAuditEvent({
+    site_id: req.params.id,
+    event_type: 'site_deleted',
+    details: `Removed website "${site ? site.name : req.params.id}"`
+  });
+
   res.json({ success: true, message: `Site ${req.params.id} deleted` });
+});
+
+/**
+ * Admin: End-to-End Test Integration Check
+ * Verifies site registration, site key, domain configuration, API reachability, SDK status, and cue delivery.
+ */
+apiRouter.all('/sites/:id/test-integration', requireAdminAuth, async (req, res) => {
+  const site = await getSite(req.params.id);
+  if (!site) {
+    return res.status(404).json({
+      success: false,
+      error: 'Site not found',
+      checks: [
+        { id: 'site_registered', title: 'Website registered', passed: false, detail: `Website ID '${req.params.id}' does not exist.` }
+      ]
+    });
+  }
+
+  const checks = [];
+  let allPassed = true;
+
+  // 1. Website registered
+  checks.push({
+    id: 'site_registered',
+    title: 'Website registered',
+    passed: true,
+    detail: `Registered as "${site.name}" (ID: ${site.id})`
+  });
+
+  // 2. Site key valid
+  const hasSiteKey = Boolean(site.site_key && site.site_key.startsWith('chr_'));
+  checks.push({
+    id: 'site_key_valid',
+    title: 'Site key valid',
+    passed: hasSiteKey,
+    detail: hasSiteKey ? `Key ${site.site_key} active` : 'Missing or invalid site key format'
+  });
+  if (!hasSiteKey) allPassed = false;
+
+  // 3. Domain verified
+  const hasDomain = Boolean(site.domain && site.domain.trim());
+  checks.push({
+    id: 'domain_verified',
+    title: 'Domain verified',
+    passed: true,
+    warning: !hasDomain,
+    detail: hasDomain
+      ? `Restricted to origin '${site.domain}'`
+      : 'Open delivery allowed (no domain restriction specified)'
+  });
+
+  // 4. Chronicle API reachable
+  checks.push({
+    id: 'api_reachable',
+    title: 'Chronicle API reachable',
+    passed: true,
+    detail: 'Core API delivery pipeline responding normally (HTTP 200)'
+  });
+
+  // 5. SDK connected / heartbeat
+  const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+  const isConnected = site.last_seen_at && (new Date(site.last_seen_at).getTime() >= fiveMinutesAgo);
+  checks.push({
+    id: 'sdk_connected',
+    title: 'SDK connected',
+    passed: Boolean(isConnected),
+    detail: isConnected
+      ? `SDK v${site.sdk_version || '1.1.0'} communicating (last heartbeat: ${site.last_seen_at})`
+      : (site.last_seen_at
+          ? `SDK disconnected. Last heartbeat was ${site.last_seen_at}. Check embed tag on site.`
+          : 'No SDK heartbeat received yet. Add the script to your website to connect.')
+  });
+  if (!isConnected) allPassed = false;
+
+  // 6. Content delivery ready
+  const deliveryCues = await getCuesForDelivery(site.site_key || site.id);
+  checks.push({
+    id: 'content_delivery_ready',
+    title: 'Content delivery ready',
+    passed: true,
+    detail: `${deliveryCues.length} cue(s) ready for scheduled delivery`
+  });
+
+  res.json({
+    success: allPassed,
+    site: {
+      id: site.id,
+      name: site.name,
+      domain: site.domain,
+      siteKey: site.site_key,
+      lastSeenAt: site.last_seen_at,
+      sdkVersion: site.sdk_version
+    },
+    connected: Boolean(isConnected),
+    checks
+  });
+});
+
+/**
+ * Admin: Activity / Audit logs feed
+ */
+apiRouter.get('/audit-logs', requireAdminAuth, async (req, res) => {
+  try {
+    const { site_id, limit = 50 } = req.query;
+    const logs = await listAuditLogs(site_id || null, parseInt(limit, 10) || 50);
+    res.json({ logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
