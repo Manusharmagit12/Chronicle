@@ -241,18 +241,30 @@ export async function initDb() {
 
 export async function getSite(siteKey) {
   if (!siteKey) return null;
+  let site = null;
   if (isPostgresDatabase()) {
     const pool = getPgPool();
     const res = await pool.query(
       'SELECT * FROM sites WHERE id = $1 OR site_key = $1 LIMIT 1',
       [siteKey]
     );
-    return res.rows[0] || null;
+    site = res.rows[0] || null;
+    if (site && !site.site_key) {
+      const generatedKey = 'chr_live_' + crypto.randomBytes(8).toString('hex');
+      await pool.query('UPDATE sites SET site_key = $1 WHERE id = $2', [generatedKey, site.id]);
+      site.site_key = generatedKey;
+    }
   } else {
     const db = await getSqliteDb();
     const stmt = db.prepare('SELECT * FROM sites WHERE id = ? OR site_key = ? LIMIT 1');
-    return stmt.get(siteKey, siteKey) || null;
+    site = stmt.get(siteKey, siteKey) || null;
+    if (site && !site.site_key) {
+      const generatedKey = 'chr_live_' + crypto.randomBytes(8).toString('hex');
+      db.prepare('UPDATE sites SET site_key = ? WHERE id = ?').run(generatedKey, site.id);
+      site.site_key = generatedKey;
+    }
   }
+  return site;
 }
 
 export async function upsertSite({ id, name, domain, site_key }) {
