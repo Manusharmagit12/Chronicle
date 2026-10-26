@@ -142,6 +142,9 @@
    * Initialize Dashboard
    */
   async function init() {
+    if (cueStartInput) cueStartInput.setAttribute('step', '1');
+    if (cueEndInput) cueEndInput.setAttribute('step', '1');
+
     setupEventListeners();
     await fetchServerConfig();
     await checkAuthStatus();
@@ -681,6 +684,9 @@
     const now = getServerNow();
     const startMs = now.getTime() + (startOffsetSec * 1000);
     const endMs = startMs + (durationSec * 1000);
+
+    if (cueStartInput) cueStartInput.setAttribute('step', '1');
+    if (cueEndInput) cueEndInput.setAttribute('step', '1');
 
     cueStartInput.value = isoToLocalDatetime(new Date(startMs).toISOString());
     cueEndInput.value = isoToLocalDatetime(new Date(endMs).toISOString());
