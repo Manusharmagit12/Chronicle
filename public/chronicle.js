@@ -300,13 +300,19 @@
   function mountInSelector(cue) {
     injectChronicleStyles();
 
-    const targetEl = document.querySelector(cue.target_selector);
+    let targetEl = document.querySelector(cue.target_selector);
+    if (!targetEl && cue.target_selector === '#notice-board') {
+      targetEl = document.querySelector('#chronicle-notice-board');
+    }
     if (!targetEl) {
       console.warn(`[Chronicle] Target selector not found: ${cue.target_selector}`);
       // Retry after a short delay in case target renders asynchronously
       setTimeout(() => {
         if (!state.renderedCues.has(cue.id)) {
-          const retryEl = document.querySelector(cue.target_selector);
+          let retryEl = document.querySelector(cue.target_selector);
+          if (!retryEl && cue.target_selector === '#notice-board') {
+            retryEl = document.querySelector('#chronicle-notice-board');
+          }
           if (retryEl) mountInSelector(cue);
         }
       }, 1000);

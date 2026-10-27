@@ -30,7 +30,7 @@ export const apiRouter = Router();
  * Validates request origin against registered site domain for production delivery
  */
 function validateSiteOrigin(req, site) {
-  if (!site || !site.domain || !site.domain.trim()) return { allowed: true };
+  if (!site) return { allowed: true };
 
   const originHeader = req.headers.origin;
   const refererHeader = req.headers.referer;
@@ -45,43 +45,70 @@ function validateSiteOrigin(req, site) {
   let callerHost = '';
   try {
     const parsedCaller = new URL(callerUrl);
-    callerOrigin = parsedCaller.origin.toLowerCase();
+    callerOrigin = parsedCaller.origin.toLowerCase().replace(/\/+$/, '');
     callerHost = parsedCaller.hostname.toLowerCase();
   } catch (e) {
     return { allowed: true };
   }
 
-  // In non-production, allow localhost and loopback interfaces for testing
-  if (process.env.NODE_ENV !== 'production') {
-    if (callerHost === 'localhost' || callerHost === '127.0.0.1') {
-      return { allowed: true };
-    }
-  }
-
-  // Support multiple registered domains (comma, semicolon, or whitespace separated)
-  const registeredEntries = site.domain.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
-  if (registeredEntries.length === 0) {
+  // Always allow localhost and loopback interfaces for development / testing
+  if (callerHost === 'localhost' || callerHost === '127.0.0.1') {
     return { allowed: true };
   }
 
-  for (const entry of registeredEntries) {
-    try {
-      const formatted = entry.startsWith('http://') || entry.startsWith('https://')
-        ? entry
-        : `https://${entry}`;
-      const entryUrl = new URL(formatted);
-      const entryOrigin = entryUrl.origin.toLowerCase();
-      const entryHost = entryUrl.hostname.toLowerCase();
+  const authorizedOrigins = new Set();
+  const authorizedHosts = new Set();
 
-      if (callerOrigin === entryOrigin || callerHost === entryHost) {
-        return { allowed: true };
-      }
-    } catch (e) {
-      const cleanEntryHost = entry.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').split(':')[0];
-      if (callerHost === cleanEntryHost) {
-        return { allowed: true };
+  // 1. Authorized live Predix domain for site 'predix' or site key 'chr_live_701ad71ffb3394b1'
+  if (site.id === 'predix' || site.site_key === 'chr_live_701ad71ffb3394b1') {
+    authorizedOrigins.add('https://predix-1-7ill.onrender.com');
+    authorizedHosts.add('predix-1-7ill.onrender.com');
+  }
+
+  // 2. Environment variables support (PREDIX_DOMAIN, PREDIX_URL, ALLOWED_ORIGINS, ALLOWED_DOMAINS)
+  const envSources = [
+    process.env.PREDIX_DOMAIN,
+    process.env.PREDIX_URL,
+    process.env.ALLOWED_ORIGINS,
+    process.env.ALLOWED_DOMAINS
+  ].filter(Boolean).join(',');
+
+  if (envSources) {
+    for (const raw of envSources.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean)) {
+      try {
+        const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
+        authorizedOrigins.add(u.origin.toLowerCase().replace(/\/+$/, ''));
+        authorizedHosts.add(u.hostname.toLowerCase());
+      } catch (e) {
+        const h = raw.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').split(':')[0];
+        if (h) authorizedHosts.add(h);
       }
     }
+  }
+
+  // 3. Registered domains configured on the site database record
+  if (site.domain && site.domain.trim()) {
+    const registeredEntries = site.domain.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+    for (const entry of registeredEntries) {
+      try {
+        const formatted = entry.startsWith('http://') || entry.startsWith('https://')
+          ? entry
+          : `https://${entry}`;
+        const entryUrl = new URL(formatted);
+        authorizedOrigins.add(entryUrl.origin.toLowerCase().replace(/\/+$/, ''));
+        authorizedHosts.add(entryUrl.hostname.toLowerCase());
+      } catch (e) {
+        const cleanEntryHost = entry.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').split(':')[0];
+        if (cleanEntryHost) authorizedHosts.add(cleanEntryHost);
+      }
+    }
+  } else {
+    // Empty site.domain permits delivery to any origin
+    return { allowed: true };
+  }
+
+  if (authorizedOrigins.has(callerOrigin) || authorizedHosts.has(callerHost)) {
+    return { allowed: true };
   }
 
   return {
