@@ -10,6 +10,8 @@
   if (window.__ChronicleInitialized) return;
   window.__ChronicleInitialized = true;
 
+  console.log('[Chronicle] SDK loaded');
+
   // Identify the embed script tag and config
   const currentScript =
     document.currentScript ||
@@ -38,6 +40,8 @@
     return;
   }
 
+  console.log('[Chronicle] Site key detected');
+
   const pollAttr = currentScript.getAttribute('data-poll-interval');
   const pollIntervalMs = pollAttr ? parseInt(pollAttr, 10) : 4000;
 
@@ -65,13 +69,16 @@
    */
   async function fetchCues() {
     try {
+      console.log('[Chronicle] Connecting to Chronicle');
       const url = `${state.apiUrl}/api/v1/cues?siteKey=${encodeURIComponent(state.siteKey)}&sdkVersion=1.1.0&path=${encodeURIComponent(window.location.pathname)}`;
       const response = await fetch(url);
+      console.log(`[Chronicle] API response: ${response.status} ${response.statusText}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
+      console.log(`[Chronicle] Cues received: ${data.cues ? data.cues.length : 0}`);
 
       // Synchronize clock drift with server time
       if (data.serverTime) {

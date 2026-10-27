@@ -233,6 +233,89 @@ export async function initDb() {
   } catch (seedErr) {
     console.warn('[Chronicle DB] Notice: Seed check skipped or failed:', seedErr.message);
   }
+
+  // Ensure site 'predix' is registered and configured with its live Render domain
+  try {
+    const predixKey = 'chr_live_701ad71ffb3394b1';
+    let predixSite = await getSite(predixKey) || await getSite('predix');
+    const targetDomain = 'https://predix-1-7ill.onrender.com, http://localhost:3001, http://localhost:3000';
+
+    if (!predixSite) {
+      predixSite = await upsertSite({
+        id: 'predix',
+        name: 'Predix',
+        domain: targetDomain,
+        site_key: predixKey
+      });
+      console.log('[Chronicle DB] Provisioned site "predix" with key', predixKey);
+    } else {
+      // Ensure the deployed Render origin is present in domain configuration
+      const currentDomain = predixSite.domain || '';
+      if (!currentDomain.includes('predix-1-7ill.onrender.com')) {
+        const mergedDomain = currentDomain
+          ? `${currentDomain}, https://predix-1-7ill.onrender.com`
+          : targetDomain;
+        if (isPostgresDatabase()) {
+          const pool = getPgPool();
+          await pool.query('UPDATE sites SET domain = $1, site_key = COALESCE(site_key, $2) WHERE id = $3', [
+            mergedDomain,
+            predixKey,
+            predixSite.id
+          ]);
+        } else {
+          const db = await getSqliteDb();
+          db.prepare('UPDATE sites SET domain = ?, site_key = COALESCE(site_key, ?) WHERE id = ?').run(
+            mergedDomain,
+            predixKey,
+            predixSite.id
+          );
+        }
+        predixSite.domain = mergedDomain;
+        console.log('[Chronicle DB] Updated site "predix" domain to:', mergedDomain);
+      }
+    }
+
+    // Provision or verify the 1-minute to 3-minute integration test cue for Predix
+    const cueId = 'cue-predix-integration-test';
+    const existingTestCue = await getCue(cueId);
+    const now = Date.now();
+    const testCueStart = new Date(now + 60 * 1000).toISOString();
+    const testCueEnd = new Date(now + 180 * 1000).toISOString();
+
+    const cuePayload = {
+      id: cueId,
+      site_id: predixSite.id,
+      title: 'Chronicle External Integration Test',
+      placement_type: 'selector',
+      target_selector: '#chronicle-notice-board',
+      action: 'replace',
+      content_html: `
+        <div class="chronicle-notice-card" style="margin: 16px 24px; padding: 18px 22px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95)); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); color: #f8fafc; font-family: system-ui, -apple-system, sans-serif;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span style="background: #2563eb; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;">⚡ Live Test Cue</span>
+            <span style="font-size: 12px; color: #94a3b8;">Chronicle ↔ Predix Integration</span>
+          </div>
+          <h4 style="margin: 0 0 6px 0; color: #f8fafc; font-size: 16px; font-weight: 600;">Chronicle External Integration Test</h4>
+          <p style="margin: 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">This scheduled notice is automatically delivered by the Chronicle Engine to Predix without page reload.</p>
+        </div>
+      `,
+      css_styles: '',
+      start_at: testCueStart,
+      end_at: testCueEnd,
+      is_active: 1
+    };
+
+    if (!existingTestCue) {
+      await createCue(cuePayload);
+      console.log('[Chronicle DB] Created integration test cue for Predix');
+    } else if (new Date(existingTestCue.end_at).getTime() < now) {
+      // Re-arm expired test cue with fresh 1min-3min schedule on boot
+      await updateCue(cueId, cuePayload);
+      console.log('[Chronicle DB] Re-armed integration test cue schedule for Predix');
+    }
+  } catch (predixErr) {
+    console.warn('[Chronicle DB] Notice: Predix registration sync:', predixErr.message);
+  }
 }
 
 /* =======================================================================

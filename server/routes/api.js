@@ -30,61 +30,63 @@ export const apiRouter = Router();
  * Validates request origin against registered site domain for production delivery
  */
 function validateSiteOrigin(req, site) {
-  if (!site || !site.domain) return { allowed: true };
+  if (!site || !site.domain || !site.domain.trim()) return { allowed: true };
 
   const originHeader = req.headers.origin;
   const refererHeader = req.headers.referer;
 
-  // Handle missing Origin/Referer headers safely (e.g. server-side proxy, mobile, or curl)
+  // Handle missing Origin/Referer headers safely (e.g. server-side proxy, mobile, curl)
   if (!originHeader && !refererHeader) {
     return { allowed: true };
   }
 
   const callerUrl = originHeader || refererHeader;
   let callerOrigin = '';
+  let callerHost = '';
   try {
-    callerOrigin = new URL(callerUrl).origin.toLowerCase();
+    const parsedCaller = new URL(callerUrl);
+    callerOrigin = parsedCaller.origin.toLowerCase();
+    callerHost = parsedCaller.hostname.toLowerCase();
   } catch (e) {
     return { allowed: true };
   }
 
   // In non-production, allow localhost and loopback interfaces for testing
   if (process.env.NODE_ENV !== 'production') {
-    try {
-      const host = new URL(callerOrigin).hostname;
-      if (host === 'localhost' || host === '127.0.0.1') {
-        return { allowed: true };
-      }
-    } catch (e) {}
-  }
-
-  // Normalize site domain
-  let siteOrigin = '';
-  try {
-    const formatted = site.domain.startsWith('http://') || site.domain.startsWith('https://')
-      ? site.domain
-      : `https://${site.domain}`;
-    siteOrigin = new URL(formatted).origin.toLowerCase();
-  } catch (e) {
-    return { allowed: true };
-  }
-
-  if (callerOrigin === siteOrigin) {
-    return { allowed: true };
-  }
-
-  // Also match identical hostnames (e.g. matching port or subdomain)
-  try {
-    const callerHost = new URL(callerOrigin).hostname;
-    const siteHost = new URL(siteOrigin).hostname;
-    if (callerHost === siteHost) {
+    if (callerHost === 'localhost' || callerHost === '127.0.0.1') {
       return { allowed: true };
     }
-  } catch (e) {}
+  }
+
+  // Support multiple registered domains (comma, semicolon, or whitespace separated)
+  const registeredEntries = site.domain.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+  if (registeredEntries.length === 0) {
+    return { allowed: true };
+  }
+
+  for (const entry of registeredEntries) {
+    try {
+      const formatted = entry.startsWith('http://') || entry.startsWith('https://')
+        ? entry
+        : `https://${entry}`;
+      const entryUrl = new URL(formatted);
+      const entryOrigin = entryUrl.origin.toLowerCase();
+      const entryHost = entryUrl.hostname.toLowerCase();
+
+      if (callerOrigin === entryOrigin || callerHost === entryHost) {
+        return { allowed: true };
+      }
+    } catch (e) {
+      const cleanEntryHost = entry.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').split(':')[0];
+      if (callerHost === cleanEntryHost) {
+        return { allowed: true };
+      }
+    }
+  }
 
   return {
     allowed: false,
-    reason: `Origin '${callerOrigin}' is not authorized to deliver cues for site '${site.id}' (configured domain: '${siteOrigin}').`
+    reason: `Origin '${callerOrigin}' is not authorized to deliver cues for site '${site.id}' (configured domain: '${site.domain}').`
   };
 }
 
@@ -640,6 +642,75 @@ apiRouter.get('/audit-logs', requireAdminAuth, async (req, res) => {
     const { site_id, limit = 50 } = req.query;
     const logs = await listAuditLogs(site_id || null, parseInt(limit, 10) || 50);
     res.json({ logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Integration Test Helper: Schedule or refresh the standard integration test cue
+ * Title: Chronicle External Integration Test
+ * Target selector: #chronicle-notice-board
+ * Action: replace
+ * Start: ~1 minute after creation
+ * End: ~3 minutes after creation
+ */
+apiRouter.post('/test/schedule-integration-cue', async (req, res) => {
+  try {
+    const { siteKey = 'chr_live_701ad71ffb3394b1', startDelaySeconds = 60, durationSeconds = 120 } = req.body || {};
+    const site = await getSite(siteKey);
+    if (!site) {
+      return res.status(404).json({ error: `Site '${siteKey}' not found` });
+    }
+
+    const now = Date.now();
+    const startMs = now + (startDelaySeconds * 1000);
+    const endMs = startMs + (durationSeconds * 1000);
+
+    const cueId = 'cue-predix-integration-test';
+    const cueData = {
+      id: cueId,
+      site_id: site.id,
+      title: 'Chronicle External Integration Test',
+      placement_type: 'selector',
+      target_selector: '#chronicle-notice-board',
+      action: 'replace',
+      content_html: `
+        <div class="chronicle-notice-card" style="margin: 16px 24px; padding: 18px 22px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95)); border: 1px solid rgba(59, 130, 246, 0.5); border-radius: 12px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); color: #f8fafc; font-family: system-ui, -apple-system, sans-serif;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <span style="background: #2563eb; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em;">⚡ Live Test Cue</span>
+            <span style="font-size: 12px; color: #94a3b8;">Chronicle ↔ Predix Integration</span>
+          </div>
+          <h4 style="margin: 0 0 6px 0; color: #f8fafc; font-size: 16px; font-weight: 600;">Chronicle External Integration Test</h4>
+          <p style="margin: 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">This scheduled notice is automatically delivered by the Chronicle Engine to Predix without page reload.</p>
+        </div>
+      `,
+      css_styles: '',
+      start_at: new Date(startMs).toISOString(),
+      end_at: new Date(endMs).toISOString(),
+      is_active: 1
+    };
+
+    const existing = await getCue(cueId);
+    let resultCue;
+    if (existing) {
+      resultCue = await updateCue(cueId, cueData);
+    } else {
+      resultCue = await createCue(cueData);
+    }
+
+    await logAuditEvent({
+      site_id: site.id,
+      event_type: 'cue_scheduled',
+      details: `Integration test cue scheduled: starts in ${startDelaySeconds}s, ends in ${startDelaySeconds + durationSeconds}s`
+    });
+
+    res.json({
+      success: true,
+      message: 'Integration test cue scheduled successfully',
+      cue: resultCue,
+      serverTime: new Date(now).toISOString()
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -14,8 +14,19 @@ await initDb();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all external origins (crucial for client embed scripts on target websites)
-app.use(cors());
+// Enable CORS for external client embed scripts on target websites
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser requests (e.g. mobile, curl, server-side fetch)
+    if (!origin) return callback(null, true);
+    // Reflect caller origin so browser cross-origin requests succeed,
+    // while route-level validateSiteOrigin strictly enforces registered domain rules
+    return callback(null, origin);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Chronicle-Admin-Key', 'X-Chronicle-Admin-Token']
+}));
 app.use(express.json());
 
 // Serve static assets (the chronicle.js embed library and dashboard)
